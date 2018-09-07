@@ -34,7 +34,7 @@ def do_check_sum(packet):
     location = 0
     while location < len(packet):
         # 将报文 划分成多个 16 位 的片段
-        value = ord(packet[location] << 8) + ord(packet[location + 1])
+        value = (ord(packet[location]) << 8) + ord(packet[location + 1])
         chk_sum = chk_sum + value
         location = location + 2
     chk_sum = (chk_sum >> 16) + (chk_sum & 0xffff)

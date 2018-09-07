@@ -5,6 +5,13 @@ from enum import Enum
 from config.function import do_check_sum
 
 
+class Proto(object):
+    """ Protocol  Names"""
+    ICMP = 'icmp'
+    TCP = 'tcp'
+    UDP = 'udp'
+
+
 class IPV(Enum):
     """ IP Version """
     ERROR = 0   # ip 格式错误
@@ -12,12 +19,16 @@ class IPV(Enum):
     IPV6 = 2    # ipv6
 
 
+class IP(object):
+    pass
+
+
 class ICMP(object):
     """ ICMP-网际控制报文 """
     def __init__(self):
         """ 默认初始化一个 ID 为0的 回送请求报文 """
-        self.config()
         self.format = 'bbHHH'
+        self.construct()
 
     def construct(self, Type=8, Code=0, ID=0, Seq=0, Data=''):
         """ 构建 ICMP 报文 """
