@@ -7,5 +7,7 @@ from tools.ping import ICMPing
 print IPV6_REGEX
 print check_ip('10.8.120.252')
 
-icmping = ICMPing('10.8.120.46')
-icmping.ping()
+icmping = ICMPing('10.2.0.2')
+for i in range(100):
+    icmping.ping()
+    icmping.output()

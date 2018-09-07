@@ -1,3 +1,3 @@
 #!/bin/bash
 
-rm *.pyc
+rm -rf *.pyc

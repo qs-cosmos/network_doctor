@@ -131,7 +131,7 @@ class ICMPing(object):
         - 因此, 需要进行多次 select.select()
         - 对于 send - recv 这一过程的总超时时间为 self.timeout 是确定的
         - 每进行一次循环, select.select() 的超时时间也就要相应的减少
-        - 以保证 总的超时时间为 : self.timeout()
+        - 以保证 总的超时时间为 : self.timeout
         已知. 发送开始时间 则 select.select 剩余超时时间为 :
           self.time_out - timeit.default_timer() + self.sent_time
 
