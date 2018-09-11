@@ -156,7 +156,7 @@ class DNS(object):
         self.question = Question()
         self.question.construct(domain)
 
-        return header + self.question.question
+        return header + self.question
 
     def analysis(self, packet):
         """ DNS 回答报文解析

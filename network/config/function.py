@@ -2,27 +2,34 @@
 
 """ 定义常用的功能函数 和 功能类
 
-- get_ipv6_regex():
-  由于IPv6 正则表达式过长, 因此将其单独放在配置文件ipv6.regex中, 使用该函数读取
-  配置文件中的内容, 并转换成正则表达式。
+- get_ip_regex():
+  由于IPV4 和 IPv6 正则表达式过长, 因此将其分别放在配置文件 ipv4.regex 和
+  ipv6.regex中, 使用该函数读取配置文件中的内容, 并转换成正则表达式。
 
 - do_check_sum(packet):
   计算网络数据报文校验和。
 
 - check_ip(ip):
   检查ip格式是否正确, 并区分ipv4/ipv6。
+
+- get_host_ip():
+  获取本机 ip
 """
 
 import os
 import re
+import platform
 
 
-def get_ipv6_regex():
-    """ 获取 IPV6 正则表达式 配置 """
+def get_ip_regex():
+    """ 获取 IPV4 和 IPV6 正则表达式 配置 """
     current_dir = os.path.dirname(os.path.realpath(__file__))
-    ipv6_regex_file = current_dir + os.sep + 'ipv6.regex'
-    with open(ipv6_regex_file, 'r') as f:
-        return re.compile(f.readline().strip())
+
+    def read(filename):
+        ip_regex_file = current_dir + os.sep + filename
+        with open(ip_regex_file, 'r') as f:
+            return re.compile(f.readline().strip())
+    return read('ipv4.regex'), read('ipv6.regex')
 
 
 def do_check_sum(packet):
@@ -39,9 +46,7 @@ def do_check_sum(packet):
         location = location + 2
     chk_sum = (chk_sum >> 16) + (chk_sum & 0xffff)
     chk_sum = (chk_sum >> 16) + chk_sum
-    chk_sum = ~chk_sum & 0xffff
-    chk_sum = (chk_sum >> 8) + (chk_sum << 8 & 0xff00)
-    return chk_sum
+    return ~chk_sum & 0xffff
 
 
 def check_ip(ip):
@@ -62,3 +67,31 @@ def check_ip(ip):
     if re.match(IPV6_REGEX, ip) is not None:
         return IPV.IPV6
     return IPV.ERROR
+
+
+def get_host_ip():
+    """ 获取 本机 ip """
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+    return ip
+
+
+def get_dns_servers():
+    """ 获取 本地 DNS 服务器 """
+    name = platform.system()
+    if name in {'Linux', 'Darwin'}:
+        with open('/etc/resolv.conf', 'r') as dns_config:
+            content = dns_config.readlines()
+            dns_server = filter(lambda x: 'nameserver' in x, content)
+            replace = r'(\#.*)|nameserver|\s+'
+            dns_server = map(lambda x: re.sub(replace, '', x), dns_server)
+            return dns_server
+    elif name in {'Windows'}:
+        pass
+    else:
+        return []

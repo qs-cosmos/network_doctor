@@ -1,6 +1,6 @@
 # coding: utf-8
 
-""" 检测网络延迟和丢包率
+""" 基于 IPv4 检测网络延迟和丢包率
 
 基本思路:
     ICMP, TCP, UDP, HTTP 均可用于检测网络延迟和丢包率, 但是每种协议的检测过程和
@@ -16,11 +16,12 @@ import re
 import select
 import socket
 import threading
+import time
 import timeit
 
 from config.function import check_ip
 from config.structure import ICMPingStruct
-from packet import IPV, Proto, ICMP
+from packet import IPV, IPV4, Proto, ICMP
 
 
 class ICMPing(object):
@@ -44,7 +45,7 @@ class ICMPing(object):
         self.sock = None
         self.config(dst, rst=True)
 
-    def config(self, dst=None, interval=1, timeout=1, rst=False):
+    def config(self, dst=None, interval=0.0, timeout=1, rst=False):
         """ 配置 ICMPing
 
         @param dst: 目的主机IP
@@ -62,7 +63,7 @@ class ICMPing(object):
         @param rst: 清空 record/records
         @type  rst: Bool
 
-        @raise : socket.error
+        @raise socket.error
         """
         new = False
         if dst is not None:
@@ -90,16 +91,14 @@ class ICMPing(object):
         @return: 网络套接字
         @rtype : socket
 
-        @raise : socket.error
+        @raise socket.error: 内部不处理 socket.error, 统一交由外部处理
         """
         ipv = check_ip(self.dst_ip)
         icmp = socket.getprotobyname(Proto.ICMP)
-        if ipv == IPV.ERROR:
+        if ipv in {IPV.ERROR, IPV.IPV6}:
             return None
         elif ipv == IPV.IPV4:
             return socket.socket(socket.AF_INET, socket.SOCK_RAW, icmp)
-        elif ipv == IPV.IPV6:
-            return socket.socket(socket.AF_INET6, socket.SOCK_RAW, icmp)
         else:
             return None
 
@@ -135,34 +134,38 @@ class ICMPing(object):
         已知. 发送开始时间 则 select.select 剩余超时时间为 :
           self.time_out - timeit.default_timer() + self.sent_time
 
-        @return: (recv_time, ICMP 回送响应报文)
-        @rtype : (double, ICMP())
+        @return: (recv_time, ICMP 回送响应报文, IP数据报)
+        @rtype : (double, ICMP(), IP())
         """
         remained_time = 0
         while True:
             remained_time = self.timeout - timeit.default_timer() + sent_time
             readable = select.select([self.sock], [], [], remained_time)[0]
             if len(readable) == 0:
-                return (-1, None)
+                return (-1, None, None)
 
             packet, addr = self.sock.recvfrom(1024)
             recv_time = timeit.default_timer()
+            recv_ipv4 = IPV4()
+            recv_ipv4.analysis(packet)
             recv_icmp = ICMP()
-            ok = recv_icmp.analysis(packet[20:])
+            self.temp = packet
+            ok = recv_icmp.analysis(packet[recv_ipv4.header_length:])
             if ok and recv_icmp.id == self.id:
-                return (recv_time, recv_icmp)
+                return (recv_time, recv_icmp, recv_ipv4)
             if recv_time - sent_time >= self.timeout:
-                return (-1, None)
+                return (-1, None, None)
 
     def ping(self, seq=0):
         """ Only ping one time. """
         if self.sock is None:
             return
         sent_time, sent_icmp = self.__send(seq)
-        recv_time, recv_icmp = self.__recv(sent_time)
+        recv_time, recv_icmp, recv_ipv4 = self.__recv(sent_time)
         # 整理记录
         self.record = ICMPingStruct()
         self.record.seq = seq
+        self.record.ttl = recv_ipv4.ttl
         # 记录 ICMP 回送请求报文
         self.record.sent_size = len(sent_icmp.icmp)
         self.record.sent_timestamp = sent_time
@@ -174,6 +177,17 @@ class ICMPing(object):
         self.record.latency = -1 if latency <= 0 else latency
         # 存入历史记录
         self.records.append(self.record)
+        # 间隔 interval 时间, 再发起下一次请求
+        time.sleep(self.interval)
+
+    def close(self):
+        """ 关闭 socket 连接 """
+        if self.sock is not None:
+            self.sock.close()
+            self.sock = None
 
     def output(self):
-        print self.record.latency
+        if self.record is None:
+            print -1
+        else:
+            print self.record.latency
