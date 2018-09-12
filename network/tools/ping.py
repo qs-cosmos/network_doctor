@@ -162,6 +162,7 @@ class ICMPing(object):
             return
         sent_time, sent_icmp = self.__send(seq)
         recv_time, recv_icmp, recv_ipv4 = self.__recv(sent_time)
+        #  print recv_icmp.json()
         # 整理记录
         self.record = ICMPingStruct()
         self.record.seq = seq

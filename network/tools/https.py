@@ -18,6 +18,7 @@ import timeit
 from config.configure import DNS_SERVERS, Port
 from config.function import check_ip
 from config.structure import DNSResolverStruct
+from config.dns import DNStatus
 from packet import IPV, Proto, DNS
 
 
@@ -84,22 +85,25 @@ class DNSResolver(object):
         @param dns_server: dns 服务器
         @type  dns_server: IPV4/IPV6
 
-        @return: 发送时间
-        @rtype : double
+        @return: DNS查询报文, 发送时间
+        @rtype : (packet.DNS(), double)
 
         @raise socket.error: 内部不处理, 交由外部处理
         """
         # 构建 dns 查询报文
         query = DNS()
-        packet = query.construct(domain=self.domain, ID=self.id, Flag=1)
+        packet = query.construct(domain=self.domain, ID=self.id)
         sock.sendto(packet, (dns_server, Port.DNS))
-        return timeit.default_timer()
+        return (query, timeit.default_timer())
 
-    def __recv(self, sock, sent_time):
+    def __recv(self, sock, query, sent_time):
         """ 接收 DNS回答报文
 
         @param sock: 网络套接字
         @type  sock: socket
+
+        @param query: DNS查询报文
+        @type  query: packet.DNS
 
         @param sent_time: 发送时间
         @type  sent_time: double
@@ -120,7 +124,8 @@ class DNSResolver(object):
             recv_time = timeit.default_timer()
             response = DNS()
             ok = response.analysis(packet)
-            if ok and response.id == self.id:
+            if ok and response.id == self.id \
+                  and query.question.domain == response.question.domain:
                 return (recv_time, response)
             if recv_time - sent_time >= self.timeout:
                 return (-1, None)
@@ -130,26 +135,34 @@ class DNSResolver(object):
             return
         # 选择 DNS 服务器
         for dns_server in DNS_SERVERS:
-            sock = self.__create_socket(dns_server)
             retry = 0
             record = DNSResolverStruct()
             sent_time = 0.0
             recv_time = 0.0
             response = None
+            sock = self.__create_socket(dns_server)
             while retry < self.count:
                 # 发送 DNS 查询报文
-                sent_time = self.__send(sock, dns_server)
+                query, sent_time = self.__send(sock, dns_server)
                 # 接收 DNS 回答报文
-                recv_time, response = self.__recv(sock, sent_time)
+                recv_time, response = self.__recv(sock, query, sent_time)
                 # 超时重传
                 if recv_time - sent_time > 0 and response is not None:
                     break
                 retry = retry + 1
+                self.id = (self.id + 1) & 0xffff
+            sock.close()
             # 记录
+            record.dns_server = dns_server
             record.domain = self.domain
+            record.send_timestamp = sent_time
+            record.recv_timestamp = recv_time
+            latency = recv_time - sent_time
+            record.latency = -1 if latency < 0 else latency
 
-    def get_ip(self):
-        pass
+            # 由于 socket.recvfrom 接收的数据有误, 暂停解析DNS回答报文的内容
+            record.status = DNStatus(1)
+            record.cname = []
+            record.ip = []
 
-    def output(self):
-        pass
+            self.records.append(record)

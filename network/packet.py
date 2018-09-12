@@ -99,6 +99,16 @@ class ICMP(object):
         self.data = icmp[8:]
         return True
 
+    def json(self):
+        return {
+            'type': self.type,
+            'code': self.code,
+            'chk_sum': self.chk_sum,
+            'id': self.id,
+            'seq': self.seq,
+            'data': self.data
+        }
+
 
 class UDP(object):
     pass
@@ -115,7 +125,7 @@ class DNS(object):
         self.header_format = '!HHHHHH'
         self.construct()
 
-    def construct(self, domain=None, ID=0, Flag=256, Qa=0, An=0, Au=0, Ad=0):
+    def construct(self, domain=None, ID=0, Flag=256, Qa=1, An=0, Au=0, Ad=0):
         """ 构建一个DNS查询报文(一次只查询一个域名)
 
         @param domain: 域名
@@ -167,15 +177,23 @@ class DNS(object):
         if len(packet) < 12:
             return False
         # 解析 dns 头部
+        offset = 12
         self.id, self.flag, self.qa, self.an, self.au, self.ad = struct.unpack(
-            self.header_format, packet[0:12]
+            self.header_format, packet[0:offset]
         )
         # 解析 问题区域
         from config.dns import Question
         self.question = Question()
-        packet = self.question.analysis(packet)
+        offset = self.question.analysis(packet, offset)
+        if offset == -1:
+            return False
         # 解析 回答区域
-
+        from config.dns import Resource
+        self.answers = []
+        for i in range(self.an):
+            answer = Resource()
+            offset = answer.analysis(packet, offset)
+            self.answers.append(answer)
         # 解析 权威区域
 
         # 解析 附加信息

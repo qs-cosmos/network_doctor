@@ -1,33 +1,50 @@
 # coding: utf-8
 
+"""
+由于 socket.recvfrom() 方法接收的数据存在问题, 暂停解析 DNS 报文的工作
+"""
+
 import struct
 
 from enum import Enum
 
 
-def get_domain(packet):
+def get_domain(packet, offset):
     """ 获取 DNS报文 中问题/资源段的域名
 
-    @param packet: 以域名为开始的报文段
+    @param packet: 以问题区域为开始的报文段
     @type  packet: string
 
-    @return: (报文段中域名长度, 域名, 剩余报文段)
-    @rtype : (int, string, string)
+    @param offset: 偏移量
+    @type  offset: int
+
+    @return: (报文中域名占用字节数, 域名)
+    @rtype : (int, string)
     """
     location = 0
     length = 0
     domain = None
+    point = False
+    # 识别指针
+    if ord(packet[offset]) | 0x3f == 0xff:
+        point = True
+        offset = (ord(packet[offset]) & 0x3f << 8) + \
+                 (ord(packet[offset + 1]) & 0xff)
     while True:
         if location == 0:
-            location = struct.unpack('!b', packet[0])[0]
-            packet = packet[1:]
+            if len(packet) <= offset:
+                return (-1, None)
+            location = struct.unpack('!B', packet[offset])[0]
+            offset = offset + 1
             length = length + 1
             if location == 0:
-                return (length, domain, packet)
+                return (2 if point else length, domain)
             domain = '' if domain is None else domain + '.'
         else:
-            domain = domain + struct.unpack('!s', packet[0])[0]
-            packet = packet[1:]
+            if len(packet) <= offset:
+                return (-1, None)
+            domain = domain + struct.unpack('!s', packet[offset])[0]
+            offset = offset + 1
             length = length + 1
             location = location - 1
 
@@ -102,20 +119,59 @@ class Question(object):
                         struct.pack('!bHH', 0, self.Type.value, self.Class)
         self.length = len(self.question)
 
-    def analysis(self, packet):
+    def analysis(self, packet, offset):
         """ 解析 DNS 报文问题区域
 
         @param packet: 以问题区域为开始的报文段
         @type  packet: string
 
-        @return: 去除问题区域后的报文段
-        @rtype : string
+        @param Offset: 偏移量
+        @type  Offset: int
+
+        @return: 下一个区域的起始偏移量
+        @rtype : int
         """
-        length, self.domain, packet = get_domain(packet)
-        self.length = length + len(packet)
-        self.Type, self.Class = struct.unpack('!HH', packet)
-        return packet
+        length, self.domain = get_domain(packet, offset)
+        if self.domain is None:
+            return -1
+        offset = offset + length
+        self.Type, self.Class = struct.unpack('!HH', packet[offset:offset + 4])
+        self.length = length + 4
+        return offset + 4
 
 
 class Resource(object):
-    pass
+    """ DNS 回答报文资源记录区域 """
+
+    def analysis(self, packet, offset):
+        """ 解析 DNS 回答报文资源记录区域
+
+        @param packet: 以问题区域为开始的报文段
+        @type  packet: string
+
+        @param Offset: 偏移量
+        @type  Offset: int
+
+        @return: 下一个区域的起始偏移量
+        @rtype : int
+        """
+        #  解析域名
+        length, self.domain = get_domain(packet, offset)
+        if self.domain is None:
+            return -1
+        offset = offset + length
+        self.Type, self.Class, self.ttl, self.data_length = struct.unpack(
+            '!HHIH', packet[offset:offset + 10]
+        )
+        offset = offset + 10
+        self.Type = QueryType(self.Type)
+        self.data = None
+        if self.Type == QueryType.A:
+            def pack(x, y):
+                return str(x) + '.' + str(y)
+            self.data = reduce(pack, struct.unpack(
+                '!bbbb', packet[offset:offset + 4]
+            ))
+        elif self.Type == QueryType.CNAME:
+            length, self.data = get_domain(packet, offset)
+        return offset + self.data_length
