@@ -26,3 +26,5 @@ print '...End testing ICMPing...'
 domain = 'www.baidu.com'
 resolver = DNSResolver(domain)
 resolver.resolve()
+for record in resolver.records:
+    print record.json()

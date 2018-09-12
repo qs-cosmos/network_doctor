@@ -181,6 +181,7 @@ class DNS(object):
         self.id, self.flag, self.qa, self.an, self.au, self.ad = struct.unpack(
             self.header_format, packet[0:offset]
         )
+        return True
         # 解析 问题区域
         from config.dns import Question
         self.question = Question()
@@ -197,5 +198,3 @@ class DNS(object):
         # 解析 权威区域
 
         # 解析 附加信息
-
-        return True

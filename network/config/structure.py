@@ -52,12 +52,12 @@ class DNSResolverStruct(object):
         self.send_timestamp = 0.0   # 发送时间戳        (单位 : s)
         self.recv_timestamp = 0.0   # 接收时间戳        (单位 : s)
         self.latency = 0            # 请求解析延迟      (单位 : ms)
-        self.status = DNStatus(0)   # DNS报文的状态码
+        self.status = 0   # DNS报文的状态码
 
     def json(self):
         return {
             'dns_server': self.dns_server,
-            'name': self.name,
+            'name': self.domain,
             'cname': self.cname,
             'ip': self.ip,
             'status': self.status,

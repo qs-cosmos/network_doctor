@@ -32,7 +32,6 @@ class DNSResolver(object):
     def __init__(self, domain):
         # 预声明 self.domain, self.record
         self.domain = None
-        self.record = None
         self.config(domain)
 
     def config(self, domain=None, timeout=0.5, count=2):
@@ -124,8 +123,8 @@ class DNSResolver(object):
             recv_time = timeit.default_timer()
             response = DNS()
             ok = response.analysis(packet)
-            if ok and response.id == self.id \
-                  and query.question.domain == response.question.domain:
+            if ok and response.id == self.id:
+                #  and query.question.domain == response.question.domain:
                 return (recv_time, response)
             if recv_time - sent_time >= self.timeout:
                 return (-1, None)
@@ -157,11 +156,11 @@ class DNSResolver(object):
             record.domain = self.domain
             record.send_timestamp = sent_time
             record.recv_timestamp = recv_time
-            latency = recv_time - sent_time
+            latency = (recv_time - sent_time) * 1000
             record.latency = -1 if latency < 0 else latency
 
             # 由于 socket.recvfrom 接收的数据有误, 暂停解析DNS回答报文的内容
-            record.status = DNStatus(1)
+            record.status = 0
             record.cname = []
             record.ip = []
 

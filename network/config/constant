@@ -9,6 +9,7 @@
 # 运行时配置
 + dns 服务器
 + host_ip
++ check_list
 
 # 常用工具函数
 + 计算校验和 - packet.py

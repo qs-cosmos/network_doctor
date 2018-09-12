@@ -49,7 +49,7 @@ def get_domain(packet, offset):
             location = location - 1
 
 
-class DNStatus(Enum):
+class DNStatus(object):
     """ DNS 报文的状态码
 
     取值说明: [0, 9] => DNS RCODES, [10, ) => 自定义
@@ -68,7 +68,7 @@ class DNStatus(Enum):
     TIME_OUT = 11                   # 超时
 
 
-class QueryType(Enum):
+class QueryType(object):
     """ DNS 报文常用查询类型 """
     A = 1                           # 由域名获得IPv4地址
     NS = 2                          # 查询域名服务器
@@ -116,7 +116,7 @@ class Question(object):
 
         nodes = map(pack, self.domain.split('.'))
         self.question = reduce(lambda x, y: x + y, nodes) + \
-                        struct.pack('!bHH', 0, self.Type.value, self.Class)
+                        struct.pack('!bHH', 0, self.Type, self.Class)
         self.length = len(self.question)
 
     def analysis(self, packet, offset):
@@ -164,7 +164,6 @@ class Resource(object):
             '!HHIH', packet[offset:offset + 10]
         )
         offset = offset + 10
-        self.Type = QueryType(self.Type)
         self.data = None
         if self.Type == QueryType.A:
             def pack(x, y):

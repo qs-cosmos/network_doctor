@@ -95,3 +95,14 @@ def get_dns_servers():
         pass
     else:
         return []
+
+
+def get_check_list():
+    """ 获取 需要检测的域名列表 """
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    check_list = current_dir + os.sep + 'check_list'
+    with open(check_list, 'r') as f:
+        comment = r'\s*#.*'
+        domains = map(lambda x: x.strip(), f.readlines())
+        domains = filter(lambda x: re.match(comment, x) is None, domains)
+        return domains
