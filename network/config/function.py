@@ -17,8 +17,9 @@
 """
 
 import os
-import re
 import platform
+import re
+import sys
 
 
 def get_ip_regex():

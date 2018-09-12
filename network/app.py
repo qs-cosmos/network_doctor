@@ -11,6 +11,7 @@ class Scheduler(object):
     def __init__(self, domain):
         self.domain = domain
         self.dns_resolver = DNSResolver(domain)
+        self.icmpings = []
 
     def run(self, ping_count=100):
         """运行调度器
@@ -60,7 +61,7 @@ def run():
 
 
 if __name__ == '__main__':
-    with open('result', 'w') as store:
+    with open('result.json', 'w') as store:
         import json
         store.write(json.dumps(run(), sort_keys=True,
                     indent=4, separators=(',', ':')))

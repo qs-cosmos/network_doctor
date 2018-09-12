@@ -166,7 +166,7 @@ class ICMPing(object):
         # 整理记录
         self.record = ICMPingStruct()
         self.record.seq = seq
-        self.record.ttl = recv_ipv4.ttl
+        self.record.ttl = 0 if recv_ipv4 is None else recv_ipv4.ttl
         # 记录 ICMP 回送请求报文
         self.record.sent_size = len(sent_icmp.icmp)
         self.record.sent_timestamp = sent_time
