@@ -21,6 +21,7 @@ import timeit
 
 from config.function import check_ip
 from config.structure import ICMPingStruct
+from logger import Logger
 from packet import IPV, IPV4, Proto, ICMP
 
 
@@ -34,16 +35,19 @@ class ICMPing(object):
     - ping 方法内部不处理异常 socket.error, 打印日志后直接抛出-交由上层处理。
 
     """
-    def __init__(self, dst):
+    def __init__(self):
         """ 初始化 ICMPing
 
         @param dst: 目的主机IP
         @type  dst: ipv4/ipv6
         """
-        # 预声明 self.dst_ip, self.sock
+        self.logger = Logger.get()
         self.dst_ip = None
         self.sock = None
-        self.config(dst, rst=True)
+        self.timeout = 1
+        self.interval = 0.0
+        self.id = 0
+        self.records = []
 
     def config(self, dst=None, interval=0.0, timeout=1, rst=False):
         """ 配置 ICMPing
@@ -62,8 +66,6 @@ class ICMPing(object):
 
         @param rst: 清空 record/records
         @type  rst: Bool
-
-        @raise socket.error
         """
         new = False
         if dst is not None:
@@ -77,8 +79,7 @@ class ICMPing(object):
             # 记录最新一次 ping 的结果
             self.record = None
             # 创建一个新的套接字 self.sock
-            if self.sock is not None:
-                self.sock.close()
+            self.close()
             self.sock = self.__create_socket()
 
         self.interval = interval
@@ -86,20 +87,29 @@ class ICMPing(object):
         self.id = threading.currentThread().ident & 0xffff
 
     def __create_socket(self):
-        """ 创建一个 socket
+        """ 创建一个 IPV4 socket
 
         @return: 网络套接字
         @rtype : socket
-
-        @raise socket.error: 内部不处理 socket.error, 统一交由外部处理
         """
-        ipv = check_ip(self.dst_ip)
-        icmp = socket.getprotobyname(Proto.ICMP)
-        if ipv in {IPV.ERROR, IPV.IPV6}:
-            return None
-        elif ipv == IPV.IPV4:
-            return socket.socket(socket.AF_INET, socket.SOCK_RAW, icmp)
-        else:
+        try:
+            self.logger.info('Start to create a socket.')
+            ipv = check_ip(self.dst_ip)
+            icmp = socket.getprotobyname(Proto.ICMP)
+            if ipv in {IPV.ERROR, IPV.IPV6}:
+                self.logger.ERROR('Failed to create a socket ' +
+                                  'due to the wrong IP: %s.' % (self.dst_ip))
+                return None
+            elif ipv == IPV.IPV4:
+                self.logger.info('Successfully create a socket.')
+                return socket.socket(socket.AF_INET, socket.SOCK_RAW, icmp)
+            else:
+                self.logger.ERROR('Failed to create a socket ' +
+                                  'due to a unknown cause.')
+                return None
+        except socket.error as e:
+            self.logger.error('Failed to create a socket ' +
+                              'due to the socket.error: %s' % (e))
             return None
 
     def __send(self, seq):
@@ -108,12 +118,18 @@ class ICMPing(object):
         @return: (发送时间, ICMP 回送请求报文)
         @rtype : (double, ICMP())
         """
-        # 构建 ICMP 报文
-        sent_icmp = ICMP()
-        sent_icmp.construct(ID=self.id, Seq=seq)
-        # 发送 ICMP 报文
-        self.sock.sendto(sent_icmp.icmp, (self.dst_ip, 1))
-        return (timeit.default_timer(), sent_icmp)
+        try:
+            # 构建 ICMP 报文
+            sent_icmp = ICMP()
+            sent_icmp.construct(ID=self.id, Seq=seq)
+            # 发送 ICMP 报文
+            self.logger.info('Send a echo request icmp packet.')
+            self.sock.sendto(sent_icmp.icmp, (self.dst_ip, 1))
+            return (timeit.default_timer(), sent_icmp)
+        except Exception as e:
+            self.logger.error('Failed to send a echo request icmp packet ' +
+                              'due to the Exception: %s' % (e))
+            return (-1, None)
 
     def __recv(self, sent_time):
         """ 接收 ICMP 回送响应报文
@@ -137,48 +153,71 @@ class ICMPing(object):
         @return: (recv_time, ICMP 回送响应报文, IP数据报)
         @rtype : (double, ICMP(), IP())
         """
+        self.logger.info('Expect a echo response icmp packet.')
         remained_time = 0
         while True:
             remained_time = self.timeout - timeit.default_timer() + sent_time
             readable = select.select([self.sock], [], [], remained_time)[0]
             if len(readable) == 0:
+                self.logger.warning('Waiting for the packet timeout')
                 return (-1, None, None)
 
-            packet, addr = self.sock.recvfrom(1024)
-            recv_time = timeit.default_timer()
+            # 参考: https://stackoverflow.com/questions/52288283
+            byte_stream = bytearray(4096)
+            nbytes = 0
+            recv_time = 0
+            try:
+                nbytes, addr = self.sock.recvfrom_into(byte_stream)
+                recv_time = timeit.default_timer()
+                self.logger.info('Receive a packet')
+            except Exception as e:
+                self.logger.error('Failed to receive a packet ' +
+                                  'due to the Exception: %s' % (e))
+                return (-1, None, None)
+            packet = ''
+            for i in range(nbytes):
+                packet = packet + chr(byte_stream[i])
+
             recv_ipv4 = IPV4()
             recv_ipv4.analysis(packet)
             recv_icmp = ICMP()
-            self.temp = packet
             ok = recv_icmp.analysis(packet[recv_ipv4.header_length:])
-            if ok and recv_icmp.id == self.id:
+            if ok and recv_icmp.id == self.id and recv_ipv4.src == self.dst_ip:
+                self.logger.info('Successfully get a echo response icmp ' +
+                                 'packet.')
                 return (recv_time, recv_icmp, recv_ipv4)
             if recv_time - sent_time >= self.timeout:
+                self.logger.warning('Waiting for the packet timeout')
                 return (-1, None, None)
 
     def ping(self, seq=0):
         """ Only ping one time. """
-        if self.sock is None:
-            return
-        sent_time, sent_icmp = self.__send(seq)
-        recv_time, recv_icmp, recv_ipv4 = self.__recv(sent_time)
-        #  print recv_icmp.json()
+        self.logger.info('Start to icmping the ip %s' % (self.dst_ip))
+        sent_time = -1
+        sent_icmp = None
+        recv_time = -1
+        recv_icmp = None
+        recv_ipv4 = None
+        if self.sock is not None:
+            sent_time, sent_icmp = self.__send(seq)
+            recv_time, recv_icmp, recv_ipv4 = self.__recv(sent_time)
         # 整理记录
-        self.record = ICMPingStruct()
-        self.record.seq = seq
-        self.record.ttl = 0 if recv_ipv4 is None else recv_ipv4.ttl
+        record = ICMPingStruct()
+        record.seq = seq
+        record.ttl = 0 if recv_ipv4 is None else recv_ipv4.ttl
         # 记录 ICMP 回送请求报文
-        self.record.sent_size = len(sent_icmp.icmp)
-        self.record.sent_timestamp = sent_time
+        record.sent_size = 0 if sent_icmp is None else len(sent_icmp.icmp)
+        record.sent_timestamp = sent_time * 1000
         # 记录 ICMP 回送响应报文
-        self.record.recv_size = 0 if recv_icmp is None else len(recv_icmp.icmp)
-        self.record.recv_timestamp = recv_time
+        record.recv_size = 0 if recv_icmp is None else len(recv_icmp.icmp)
+        record.recv_timestamp = recv_time * 1000
         # 计算延迟
         latency = (recv_time - sent_time) * 1000
-        self.record.latency = -1 if latency <= 0 else latency
+        record.latency = -1 if latency <= 0 else latency
         # 存入历史记录
-        self.records.append(self.record)
+        self.records.append(record)
         # 间隔 interval 时间, 再发起下一次请求
+        self.logger.info('End icmping the ip %s' % (self.dst_ip))
         time.sleep(self.interval)
 
     def close(self):
@@ -187,8 +226,5 @@ class ICMPing(object):
             self.sock.close()
             self.sock = None
 
-    def output(self):
-        if self.record is None:
-            print -1
-        else:
-            print self.record.latency
+    def json(self):
+        return map(lambda x: x.json(), self.records)
