@@ -134,6 +134,8 @@ class NetworkDoctorThread(object):
 def scheduler(thread_amount=25):
     """ 运行周期 调度程序"""
     def thread_pool(run, tasks, amount=thread_amount):
+        if len(tasks) == 0:
+            return []
         if len(tasks) < amount:
             amount = len(tasks)
         thread_pool = ThreadPool(amount)
