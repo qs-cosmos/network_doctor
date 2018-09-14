@@ -21,7 +21,7 @@ def static_logger(**kwargs):
 
 
 @static_logger(logger={})
-def getLogger(name='', level=logging.DEBUG, log_out=False):
+def getLogger(name='', level=logging.DEBUG, FIN=False):
     """ 获取 全局静态Logger对象
 
     @param name: 日志标识名
@@ -30,10 +30,13 @@ def getLogger(name='', level=logging.DEBUG, log_out=False):
     @param level: 指定日志的最低输出级别
     @type  level: int
 
+    @param FIN: 当一个运行周期完成时, 注销 name 对应的 logger
+    @type  FIN: bool
+
     @return: 日志标识名为 name 的 Logger 对象
     @rtype : logging.Logger
     """
-    if name not in getLogger.logger.keys():
+    if name not in getLogger.logger.keys() and not FIN:
         # 获取 logger 实例, 如果参数为空则返回root logger
         logger = logging.getLogger(name)
         # 指定 logger 输出格式
@@ -55,8 +58,8 @@ def getLogger(name='', level=logging.DEBUG, log_out=False):
         logger.setLevel(level)
         # 将标识名为 name 的日志对象存储到 getLogger.logger 中
         getLogger.logger[name] = logger
-    elif log_out:
-        # 注销当前日志
+    elif FIN:
+        # 注销 name 对应的日志
         getLogger.logger.pop(name)
         return None
 
@@ -80,14 +83,18 @@ class Logger(object):
             lock.release()
 
     @staticmethod
-    def log_out():
-        """ 注销 tid 与 domain 的关联并注销与 domain 关联的 logger. """
+    def log_out(FIN=False):
+        """ 注销 tid 与 domain 的关联并注销与 domain 关联的 logger.
+
+        @param FIN: 完成一个运行周期的标识符
+        @type  FIN: bool
+        """
         tid = thread.get_ident()
         lock = threading.Lock()
         lock.acquire()
         try:
             if tid in Logger.RECORDS.keys():
-                getLogger(Logger.RECORDS[tid], log_out=True)
+                getLogger(Logger.RECORDS[tid], FIN=FIN)
                 Logger.RECORDS.pop(tid)
         finally:
             lock.release()
@@ -106,13 +113,9 @@ class Logger(object):
         lock.acquire()
         try:
             if tid in Logger.RECORDS.keys():
-                return getLogger(Logger.RECORDS[tid])
+                domain = Logger.RECORDS[tid]
+                return getLogger(domain)
             else:
                 return getLogger('MAIN')
         finally:
             lock.release()
-
-
-#  if __name__ == '__main__':
-#      logger = getLogger('1')
-#      logger.info('hello')

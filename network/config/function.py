@@ -126,6 +126,8 @@ def get_check_list():
         comment = r'\s*#.*'
         domains = map(lambda x: x.strip(), f.readlines())
         domains = filter(lambda x: re.match(comment, x) is None, domains)
+        # 去重
+        domains = [domain for domain in set(domains)]
         return domains
 
 
