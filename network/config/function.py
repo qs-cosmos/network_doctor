@@ -94,15 +94,16 @@ def get_host_ip():
 
 def get_dns_servers():
     """ 获取 本地 DNS 服务器 """
+    from config.configure import OSType
     name = platform.system()
-    if name in {'Linux', 'Darwin'}:
+    if name in {OSType.LINUX, OSType.MACOS}:
         with open('/etc/resolv.conf', 'r') as dns_config:
             content = dns_config.readlines()
             dns_server = filter(lambda x: 'nameserver' in x, content)
             replace = r'(\#.*)|nameserver|\s+'
             dns_server = map(lambda x: re.sub(replace, '', x), dns_server)
             return dns_server
-    elif name in {'Windows'}:
+    elif name in {OSType.WINDOWS}:
         from config.configure import IPV4_REGEX, IPV6_REGEX
         ipconfig = os.popen('ipconfig /all').read()
         regex = r'[d|D][n|N][s|S].*:(\s*((' + IPV4_REGEX.pattern + ')|(' + \
@@ -159,5 +160,7 @@ def get_runtime_file(archive='', dirname='log',
         os.makedirs(basic_dir)
     filepath = basic_dir + os.sep + filename
     if not os.path.exists(filepath):
-        os.mknod(filepath)
+        from config.configure import OSType
+        if platform.system() in {OSType.LINUX, OSType.MACOS}:
+            os.mknod(filepath)
     return filepath

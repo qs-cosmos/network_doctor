@@ -47,11 +47,11 @@ class NetworkDoctorThread(object):
         # ping
         self.ping_params = {}
         # 间隔时间 单位: s
-        self.ping_params['interval'] = 0.5
+        self.ping_params['interval'] = 0.1
         # 超时时间 单位: s
         self.ping_params['timeout'] = 1
         # 运行次数
-        self.ping_params['count'] = 1
+        self.ping_params['count'] = 10
 
     def run(self, domain):
         if domain is None:
