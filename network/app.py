@@ -13,7 +13,6 @@
   分阶段的 Multi Thread Programming
   - 第一阶段 : 检查 DNS 解析过程 —— One Domain One Thread
   - 第二阶段 : 检查 客户端 与 目的主机 ip 之间的网络 —— One IP One Thread
-  - 第三阶段 : 存储 结果 —— One Doctor One Thread
 
   关于 运行日志 的处理逻辑 With Multi Thread Programming
   - 线程开始运行时, 进行 线程id 与 所处理的domain(域名) 的注册;
@@ -28,11 +27,18 @@
 """
 
 import json
+import socket
 import threading
+import time
 from multiprocessing.dummy import Pool as ThreadPool
-from config.configure import CHECK_LIST, DNS_SERVERS
-from config.function import get_runtime_file
+from config import server
+from config.configure import CHECK_LIST, DNS_SERVERS, BUFF_SIZE
+from config.function import get_runtime_file, check_ip
+from config.function import get_client_id, update_client_id
+from config.message import ClientMessage, ClientMessageType
+from config.message import ServerMessage, ServerMessageType
 from logger import Logger
+from packet import IPV, Proto
 from tools.https import DNSResolver
 from tools.ping import ICMPing
 
@@ -41,6 +47,7 @@ class NetworkDoctorThread(object):
     """ One NetworkDoctor for One Domain. """
     def __init__(self, domain):
         """ 运行周期: 开始阶段 """
+        self.logger = Logger.get()
         self.dns_resolver = None
         self.icmpings = {}
         self.domain = domain
@@ -59,13 +66,14 @@ class NetworkDoctorThread(object):
         # 超时时间 单位: s
         self.ping_params['timeout'] = 0.5
         # 运行次数
-        self.ping_params['count'] = 10
+        self.ping_params['count'] = 5
 
     def resolve(self):
         """ 运行周期: 检测 DNS 解析过程 """
         if self.domain is None:
             return
         Logger.sign_up(self.domain)
+        self.logger = Logger.get()
         self.dns_resolver = DNSResolver()
         self.dns_resolver.config(domain=self.domain,
                                  timeout=self.dns_resolver_params['timeout'],
@@ -82,6 +90,7 @@ class NetworkDoctorThread(object):
         def doctor():
             """ 作为中间函数, 不立即执行其中的检查过程, 便于进行多线程调度"""
             Logger.sign_up(self.domain)
+            self.logger = Logger.get()
             # 进行 ICMPing 检查
             icmping = ICMPing()
             icmping.config(dst=ip,
@@ -98,6 +107,14 @@ class NetworkDoctorThread(object):
             Logger.log_out()
         return doctor
 
+    def close(self):
+        """ 运行周期: 结束阶段 """
+        if self.domain is None:
+            return
+        Logger.sign_up(self.domain)
+        # 发送运行周期结束标识符, 注销 logger
+        Logger.log_out(FIN=True)
+
     def store(self):
         """ 运行周期: 结束阶段
 
@@ -110,13 +127,16 @@ class NetworkDoctorThread(object):
         if self.domain is None:
             return
         Logger.sign_up(self.domain)
+        self.logger = Logger.get()
 
+        result = self.json()
+        # 将检查结果存储到本地
         filepath = get_runtime_file(archive=self.domain,
                                     dirname='result',
                                     filename='network_doctor',
                                     filetype='json')
         with open(filepath, 'w') as f:
-            f.write(json.dumps(self.json(), sort_keys=True,
+            f.write(json.dumps(result, sort_keys=True,
                     indent=4, separators=(',', ':')))
 
         # 发送运行周期结束标识符, 注销 logger
@@ -124,6 +144,7 @@ class NetworkDoctorThread(object):
 
     def json(self):
         return {
+            'domain': self.domain,
             'dns_servers': DNS_SERVERS,
             'ips': self.dns_resolver.ips(),
             'dns_resolvers': self.dns_resolver.json(),
@@ -131,7 +152,77 @@ class NetworkDoctorThread(object):
         }
 
 
-def scheduler(thread_amount=25):
+def create_socket():
+    """ 创建一个 进行 TCP 通信的 socket """
+    logger = Logger.get()
+    try:
+        logger.info('Start to create a socket')
+        ipv = check_ip(server.HOST)
+        tcp = socket.getprotobyname(Proto.TCP)
+        if ipv == IPV.ERROR:
+            logger.error('Failed to create a socket ' +
+                              'due to the wrong IP: %s' % (server.HOST))
+            return None
+        elif ipv == IPV.IPV4:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, tcp)
+            sock.connect(server.ADDRESS)
+            logger.info('Successfully connect to the server.')
+            return sock
+        elif ipv == IPV.IPV6:
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM, tcp)
+            sock.connect(server.ADDRESS)
+            logger.info('Successfully connect to the server.')
+            return sock
+        else:
+            logger.error('Failed to create a socket ' +
+                              'due to a unknown error')
+            return None
+    except socket.error as e:
+        logger.error('Failed to create a socket ' +
+                          'due to the socket.error: %s' % (e))
+        return None
+
+
+def upload(doctors):
+    """ 上传数据 """
+    logger = Logger.get()
+    logger.info('Start to upload the network doctors result.')
+    sock = create_socket()
+    if sock is None:
+        return False
+    # 进行身份身份认证
+    client_id = get_client_id()
+    client_message = ClientMessage.construct(
+        Type=ClientMessageType.AUTHENTICATE, ID=client_id
+    )
+    # 暂未添加超时检测
+    sock.send(client_message)
+    server_message = eval(sock.recv(BUFF_SIZE))
+    if server_message[ServerMessage.TYPE] == ServerMessageType.STATUS_NEW_ID:
+        client_id = server_message[ServerMessage.ID]
+        update_client_id(str(client_id))
+    # 上传数据
+    for doctor in doctors:
+        message = ClientMessage.construct(
+            Type=ClientMessageType.NETWORK_DATA, Message=doctor.json()
+        )
+        client_message = ClientMessage.construct(
+            Type=ClientMessageType.DATA_LENGTH, Length=len(message)
+        )
+        sock.sendall(client_message)
+        sock.sendall(message)
+        server_message = eval(sock.recv(BUFF_SIZE))
+        if server_message[ServerMessage.TYPE] ==\
+                ServerMessageType.STATUS_FAILED:
+            logger.error('Failed to upload the data.')
+    client_message = ClientMessage.construct(
+        Type=ClientMessageType.DATA_COMPLETED
+    )
+    sock.sendall(client_message)
+    return True
+
+
+def scheduler(thread_amount=25, sleep=10):
     """ 运行周期 调度程序"""
     def thread_pool(run, tasks, amount=thread_amount):
         if len(tasks) == 0:
@@ -143,16 +234,20 @@ def scheduler(thread_amount=25):
         thread_pool.close()
         thread_pool.join()
         return result
-    # 创建线程池 和 调度资源
-    network_doctors = map(lambda x: NetworkDoctorThread(x), CHECK_LIST)
-    # 检查 DNS 解析过程
-    dst_ip_doctors = thread_pool(lambda x: x.resolve(), network_doctors)
-    # 检查客户端 与 目的主机ip 之间的网络
-    dst_ip_doctors = reduce(lambda x, y: x + y, dst_ip_doctors)
-    thread_pool(lambda x: x(), dst_ip_doctors)
-
-    # 存储结果
-    thread_pool(lambda x: x.store(), network_doctors)
+    while True:
+        # 创建线程池 和 调度资源
+        network_doctors = map(lambda x: NetworkDoctorThread(x), CHECK_LIST)
+        # 检查 DNS 解析过程
+        dst_ip_doctors = thread_pool(lambda x: x.resolve(), network_doctors)
+        # 检查客户端 与 目的主机ip 之间的网络
+        dst_ip_doctors = reduce(lambda x, y: x + y, dst_ip_doctors)
+        thread_pool(lambda x: x(), dst_ip_doctors)
+        # 存储结果至本地
+        # thread_pool(lambda x: x.store(), network_doctors)
+        thread_pool(lambda x: x.close(), network_doctors)
+        # 上传数据至服务器
+        upload(network_doctors)
+        time.sleep(sleep)
 
 
 if __name__ == '__main__':

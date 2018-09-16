@@ -157,6 +157,9 @@ class ICMPing(object):
         remained_time = 0
         while True:
             remained_time = self.timeout - timeit.default_timer() + sent_time
+            if remained_time < 0:
+                self.logger.warning('Waiting for the packet timeout')
+                return (-1, None, None)
             readable = select.select([self.sock], [], [], remained_time)[0]
             if len(readable) == 0:
                 self.logger.warning('Waiting for the packet timeout')

@@ -21,9 +21,11 @@ class Port(object):
 # IPv4 / IPv6 正则表达式
 IPV4_REGEX, IPV6_REGEX = get_ip_regex()
 
-# 本机网络环境
-HOST_IP = get_host_ip()
-DNS_SERVERS = get_dns_servers()
+# 通信编码
+CODECS = 'utf-8'
+BUFF_SIZE = 2048
 
 # 客户应用程序配置
+HOST_IP = get_host_ip()
+DNS_SERVERS = get_dns_servers()
 CHECK_LIST = get_check_list()

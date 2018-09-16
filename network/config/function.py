@@ -22,7 +22,10 @@
   获取需要 检查 的域名列表
 
 - get_runtime_file(archive, dirname, filename, filetype):
-  产生一个新的 日志文件
+  生成一个与运行时间相关的文件, 默认生成一个运行日志文件
+
+- get_client_id():
+  获取 服务器分配给 Client 的ID
 """
 
 import os
@@ -166,3 +169,23 @@ def get_runtime_file(archive='', dirname='log',
         if platform.system() in {OSType.LINUX, OSType.MACOS}:
             os.mknod(filepath)
     return filepath
+
+
+def get_client_id():
+    """ 获取 客户端 id """
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    client_id = current_dir + os.sep + 'client_id'
+    with open(client_id, 'r') as f:
+        Id = f.readline().strip()
+        if Id in {None, ''}:
+            return -1
+        else:
+            return int(Id)
+
+
+def update_client_id(Id):
+    """ 更新 客户端 id """
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    client_id = current_dir + os.sep + 'client_id'
+    with open(client_id, 'w') as f:
+        f.write(Id)

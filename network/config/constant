@@ -2,10 +2,6 @@
 + ipv4 正则表达式
 + ipv6 正则表达式
 
-# 日志标识符
-+ ICMPing
-+ DNS
-
 # 运行时配置
 + dns 服务器
 + host_ip
