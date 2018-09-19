@@ -5,7 +5,7 @@
 """
 
 import struct
-from logger import Logger
+from config.logger import Logger
 
 
 def get_domain(packet, offset):
@@ -41,17 +41,15 @@ def get_domain(packet, offset):
     while True:
         if node == 0:
             if len(packet) <= offset:
-                logger.debug('The offset %d bytes beyonds the' +
-                             'length of packet %d bytes.' % (
-                                 offset, len(packet)
-                             ))
+                m_a = 'The offset %d bytes' % (offset)
+                m_b = 'beyonds the packet length %d bytes.' % (len(packet))
+                logger.debug(m_a + m_b)
                 return (-1, None)
             if is_point(packet[offset]):
                 point = True
                 offset = skip(packet[offset: offset + 2])
                 logger.debug('The pointer jumps to %dth byte.' % (offset))
             node = struct.unpack('!B', packet[offset])[0]
-
             # 当识别为指针时, 则该段实际所占长度为 2 bytes
             # 可能会存在递归指针跳转, 实际所占长度为第一次跳转时的长度
             if point and first_skip:
@@ -63,17 +61,15 @@ def get_domain(packet, offset):
                 length = length + node + 1
             offset = offset + 1
             if node == 0:
-                logger.debug('Return —— length: %d, domain: %s' % (
-                    length, domain
-                ))
+                debug = 'Return —— length: %d, domain: %s' % (length, domain)
+                logger.debug(debug)
                 return (length, domain)
             domain = '' if domain is None else domain + '.'
         else:
             if len(packet) <= offset:
-                logger.debug('The offset %d bytes beyonds the ' +
-                             'length of packet %d bytes.' % (
-                                 offset, len(packet)
-                             ))
+                m_a = 'The offset %d bytes' % (offset)
+                m_b = 'beyonds the packet length %d bytes.' % (len(packet))
+                logger.debug(m_a + m_b)
                 return (-1, None)
             domain = domain + struct.unpack('!s', packet[offset])[0]
             offset = offset + 1
@@ -98,6 +94,7 @@ class DNStatus(object):
     NO_ANSWER = 10                  # 无回答
     TIME_OUT = 11                   # 超时
     SOCK_ERROR = 12                 # 创建 socket 时出错
+    RUN_ERROR = 13                  # 客户端内部运行错误
 
 
 class QueryType(object):
@@ -153,8 +150,8 @@ class Question(object):
             return struct.pack(f, len(x), x)
 
         nodes = map(pack, self.domain.split('.'))
-        self.packet = reduce(lambda x, y: x + y, nodes) + \
-                        struct.pack('!bHH', 0, self.Type, self.Class)
+        p_nodes = reduce(lambda x, y: x + y, nodes)
+        self.packet = p_nodes + struct.pack('!bHH', 0, self.Type, self.Class)
         self.length = len(self.packet)
 
     def analysis(self, packet, offset):
@@ -243,3 +240,98 @@ class Resource(object):
             'data_size': self.data_length,
             'data': self.data
         }
+
+
+class DNS(object):
+    """ DNS 报文 """
+
+    def __init__(self):
+        self.header_format = '!HHHHHH'
+        self.id = 0             # 会话标识  (16 bit)
+        self.flag = 256         # 标识位    (16 bit)
+        self.qa = 1             # 问题总数  (16 bit)
+        self.an = 0             # 回答总数  (16 bit)
+        self.au = 0             # 权威总数  (16 bit)
+        self.ad = 0             # 附加总数  (16 bit)
+        self.question = None
+        self.answers = []
+        self.logger = Logger.get()
+
+    def construct(self, domain=None, ID=0, Flag=256, An=0, Au=0, Ad=0):
+        """ 构建一个DNS查询报文(一次只查询一个域名)
+
+        @param domain: 域名
+        @type  domain: string
+
+        @return: 二进制DNS查询报文
+        @rtype : string
+        """
+        self.logger.info('Start to construct a dns query packet.')
+        self.id = ID
+        self.flag = Flag
+        self.an = An
+        self.au = Au
+        self.ad = Ad
+        # 构建 dns 头部
+        header = struct.pack(self.header_format, self.id, self.flag,
+                             self.qa, self.an, self.au, self.ad)
+        # 构建问题区域
+        self.question = Question()
+        self.question.construct(domain)
+
+        self.logger.info('Successfully construct a dns query packet.')
+        return header + self.question.packet
+
+    def analysis(self, packet):
+        """ DNS 回答报文解析
+
+        @param packet: 二进制DNS回答报文
+        @type  packet: string
+        """
+        self.logger.info('Start to analysis the dns response packet.')
+        if packet is None or len(packet) < 12:
+            self.logger.warning('The length of packet is less than 12 bytes.')
+            return False
+        # 解析 dns 头部
+        offset = 12
+        self.id, self.flag, self.qa, self.an, self.au, self.ad = struct.unpack(
+            self.header_format, packet[0:offset]
+        )
+        # 解析 问题区域
+        self.question = Question()
+        offset = self.question.analysis(packet, offset)
+        if offset == -1:
+            self.logger.warning('Failed to analysis the question area.')
+            return False
+        # 解析 回答区域
+        self.answers = []
+        for i in range(self.an):
+            answer = Resource()
+            offset = answer.analysis(packet, offset)
+            if offset == -1:
+                warning = 'Failed to analysis the %dth answer area' % (i)
+                self.logger.warning(warning)
+                return False
+            self.answers.append(answer)
+        # 解析 权威区域
+        # 解析 附加信息
+        self.logger.info('Successfully analysis the dns response packet.')
+        return True
+
+    def rcode(self):
+        return (self.flag & 0xf)
+
+    def answer(self, Type):
+        """ 获取 回答区域 的数据
+        @param Type: 请求类型
+        @type  Type: core.packet.dns.QueryType
+        """
+        result = []
+        try:
+            result = filter(lambda x: x.Type == Type, self.answers)
+            result = map(lambda x: x.data, result)
+        except Exception:
+            self.logger.info('The type of answers is: %s' % type(self.answers))
+            self.logger.exception('Failed to get answer about %d.' % Type)
+        finally:
+            return result

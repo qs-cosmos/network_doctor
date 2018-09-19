@@ -1,10 +1,37 @@
 # coding: utf-8
 
+import ConfigParser
 import logging
 import sys
 import thread
 import threading
-from config.function import get_runtime_file
+from config.constant import FILE
+
+
+class LOG(object):
+    # 运行日志基本配置
+    PARSER = ConfigParser.ConfigParser()
+    CONSOLE = 20
+    FILE = 10
+    LOWEST = 10
+    STORE = False
+
+    @staticmethod
+    def load(filename='base.conf'):
+        """ 加载运行日志配置文件 """
+        filepath = FILE.module(__file__) + filename
+        lock = threading.Lock()
+        lock.acquire()
+        try:
+            LOG.PARSER.read(filepath)
+            LOG.CONSOLE = LOG.PARSER.getint('logger', 'console')
+            LOG.FILE = LOG.PARSER.getint('logger', 'file')
+            LOG.LOWEST = LOG.PARSER.getint('logger', 'lowest')
+            LOG.STORE = LOG.PARSER.getboolean('logger', 'store')
+        except Exception:
+            print 'Please check your logger configure file.'
+        finally:
+            lock.release()
 
 
 def static_logger(**kwargs):
@@ -13,6 +40,8 @@ def static_logger(**kwargs):
     @param kwargs: 待添加属性
     @type  kwargs: dict
     """
+    LOG.load()
+
     def decrorate(func):
         for k in kwargs:
             setattr(func, k, kwargs[k])
@@ -21,11 +50,14 @@ def static_logger(**kwargs):
 
 
 @static_logger(logger={})
-def getLogger(name='', level=logging.DEBUG, FIN=False):
+def getLogger(name='', FIN=False):
     """ 获取 全局静态Logger对象
 
     @param name: 日志标识名
     @type  name: string
+
+    @param store: 开启文件日志
+    @type  store: bool
 
     @param level: 指定日志的最低输出级别
     @type  level: int
@@ -47,15 +79,16 @@ def getLogger(name='', level=logging.DEBUG, FIN=False):
         # 设置控制台日志处理器
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.WARNING)
-        # 设置文件日志处理器
-        file_handler = logging.FileHandler(get_runtime_file(name), mode='w')
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.DEBUG)
-        # 为 logger 添加 日志处理器
+        console_handler.setLevel(LOG.CONSOLE)
         logger.addHandler(console_handler)
-        logger.addHandler(file_handler)
-        logger.setLevel(level)
+        # 设置文件日志处理器
+        if LOG.STORE:
+            file_handler = logging.FileHandler(FILE.new(name), mode='w')
+            file_handler.setFormatter(formatter)
+            file_handler.setLevel(LOG.FILE)
+            logger.addHandler(file_handler)
+        # 设置最低日志级别
+        logger.setLevel(LOG.LOWEST)
         # 将标识名为 name 的日志对象存储到 getLogger.logger 中
         getLogger.logger[name] = logger
     elif FIN:
