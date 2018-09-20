@@ -14,7 +14,8 @@ class LOG(object):
     CONSOLE = 20
     FILE = 10
     LOWEST = 10
-    STORE = False
+    OPEN_CONS = False
+    OPEN_FILE = False
 
     @staticmethod
     def load(filename='base.conf'):
@@ -27,7 +28,8 @@ class LOG(object):
             LOG.CONSOLE = LOG.PARSER.getint('logger', 'console')
             LOG.FILE = LOG.PARSER.getint('logger', 'file')
             LOG.LOWEST = LOG.PARSER.getint('logger', 'lowest')
-            LOG.STORE = LOG.PARSER.getboolean('logger', 'store')
+            LOG.OPEN_CONS = LOG.PARSER.getboolean('logger', 'open_cons')
+            LOG.OPEN_FILE = LOG.PARSER.getboolean('logger', 'open_file')
         except Exception:
             print 'Please check your logger configure file.'
         finally:
@@ -77,12 +79,13 @@ def getLogger(name='', FIN=False):
         datefmt = '%Y-%m-%d %H:%M:%S'
         formatter = logging.Formatter(fmt, datefmt)
         # 设置控制台日志处理器
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(LOG.CONSOLE)
-        logger.addHandler(console_handler)
+        if LOG.OPEN_CONS:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            console_handler.setLevel(LOG.CONSOLE)
+            logger.addHandler(console_handler)
         # 设置文件日志处理器
-        if LOG.STORE:
+        if LOG.OPEN_FILE:
             file_handler = logging.FileHandler(FILE.new(name), mode='w')
             file_handler.setFormatter(formatter)
             file_handler.setLevel(LOG.FILE)

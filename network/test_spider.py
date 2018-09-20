@@ -4,10 +4,11 @@ import time
 from client.spider import Spider
 from config.runtime import RUNTIME
 
-RUNTIME.load()
-print RUNTIME.CHECK_LIST
-spider = Spider()
-spider.run()
+if __name__ == '__main__':
+    RUNTIME.load()
+    print RUNTIME.CHECK_LIST
+    spider = Spider()
+    spider.run()
 
-time.sleep(30)
-RUNTIME.running(False)
+    time.sleep(20)
+    RUNTIME.running(False)

@@ -29,7 +29,6 @@ class CONF(object):
     PARSER = ConfigParser.ConfigParser()
 
     # 运行配置
-    SPIDER_CYCLE = 10
     SPIDER_MAX_THREADS = 20
     SPIDER_MIN_THREADS = 5
     SPIDER_DNS = 300
@@ -239,7 +238,7 @@ class Spider(object):
                 return
             amount = CONF.apply(amount)
             pool = ThreadPool(amount)
-            self.dispatchers = pool.map(run, tasks)
+            pool.map(run, tasks)
         except Exception:
             self.logger.exception('Failed to dispatch task.')
         finally:
@@ -290,10 +289,12 @@ class Spider(object):
         """ DNS 批处理 """
         while RUNTIME.RUNNING:
             self.__dispatch(self.__dns, TASK.DNS)
+            if not RUNTIME.RUNNING:
+                break
             try:
                 info = 'dns dispatcher: sleeping for %f s.'
                 self.logger.info(info % CONF.SPIDER_DNS)
-                time.sleep(CONF.SPIDER_CYCLE)
+                time.sleep(CONF.SPIDER_DNS)
             except Exception:
                 self.logger.exception('..dns dispatcher failed to sleep ..')
 
@@ -301,6 +302,8 @@ class Spider(object):
         """ ICMPing 批处理 """
         while RUNTIME.RUNNING:
             self.__dispatch(self.__icmping, TASK.IPS)
+            if not RUNTIME.RUNNING:
+                break
             try:
                 info = 'icmping dispatcher: sleeping for %f s.'
                 self.logger.info(info % CONF.SPIDER_ICMPING)
@@ -311,6 +314,8 @@ class Spider(object):
     def __dispatcher(self, target, args=()):
         """ 创建调度线程 """
         dispatcher = threading.Thread(target=target, args=args)
+        # 设置 守护线程, 当主线程退出时
+        dispatcher.setDaemon(True)
         dispatcher.start()
         self.dispatchers.append(dispatcher)
 

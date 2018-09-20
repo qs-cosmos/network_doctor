@@ -97,12 +97,14 @@ class OS(object):
 
 def ip():
     ip = '127.0.0.1'
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
     finally:
-        s.close()
+        if s is not None:
+            s.close()
         return ip
 
 
@@ -122,9 +124,10 @@ def dns():
                 IPV.IPV6_REGEX.pattern + '))\s*\n?\s*)+'
         over = r'([d|D][n|N][s|S].*:\s+)|\s+|%.*'
         records = [rd.group() for rd in re.finditer(regex, ipconfig)]
-        records = reduce(lambda x, y: x + '\n' + y, records).\
-                  strip().split('\n')
-        dns = map(lambda x: re.sub(over, '', x), records)
+        if len(records) > 0:
+            records = reduce(lambda x, y: x + '\n' + y, records).\
+                      strip().split('\n')
+            dns = map(lambda x: re.sub(over, '', x), records)
     return filter(lambda x: x not in {'127.0.0.1', '', None}, dns)
 
 
