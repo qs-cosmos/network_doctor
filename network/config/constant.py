@@ -58,6 +58,7 @@ class FILE(object):
         """ 获取配置文件路径 """
         return FILE.main() + 'config' + os.sep + filename
 
+
 class JSON(object):
     """ json 输出格式 """
     SORT = True
@@ -105,7 +106,7 @@ class SOCKET(object):
             return None
 
     @staticmethod
-    def recvfrom(sock, timeout):
+    def recvfrom(sock, timeout, size=4096):
         """ 接收一个报文(0~4096 bytes) """
         from config.logger import Logger
         logger = Logger.get()
@@ -122,7 +123,7 @@ class SOCKET(object):
             return (-1, None)
 
         # 参考: https://stackoverflow.com/questions/52288283
-        byte_stream = bytearray(4096)
+        byte_stream = bytearray(size)
         nbytes = 0
         recv_time = 0
         try:
