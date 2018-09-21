@@ -46,7 +46,7 @@ class CONF(object):
     @staticmethod
     def load(filename='spider.conf'):
         logger = Logger.get()
-        filepath = FILE.module(__file__) + filename
+        filepath = FILE.conf(filename)
         lock = threading.Lock()
         lock.acquire()
         try:
@@ -67,7 +67,7 @@ class CONF(object):
             logger.info('Successfully load the spider configure.')
             return True
         except Exception:
-            logger.info('Please check your spider configure.')
+            logger.warn('Please check your spider configure.')
             logger.exception('Failed to load the spider configure.')
             return False
         finally:

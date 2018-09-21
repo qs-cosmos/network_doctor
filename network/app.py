@@ -1,6 +1,5 @@
 # coding: utf-8
 import sys
-import time
 from PyQt5.QtWidgets import QApplication
 from client.interface import MainWindow
 from client.spider import Spider

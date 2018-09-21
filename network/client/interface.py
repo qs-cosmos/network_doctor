@@ -10,7 +10,6 @@ Description :
 
 """
 import os
-
 from config.constant import FILE
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QDialog, QMenu, QSystemTrayIcon, QAction, qApp
@@ -18,7 +17,7 @@ from PyQt5.QtWidgets import QDialog, QMenu, QSystemTrayIcon, QAction, qApp
 
 class INTERFACE(object):
     """ 用户界面基本配置 """
-    SOURCE = FILE.module(__file__) + 'resource' + os.sep
+    SOURCE = FILE.main() + 'resource' + os.sep
     ICON = SOURCE + 'bird.png'
 
 
@@ -51,6 +50,7 @@ class MainWindow(QDialog):
 
     def __show(self):
         """ 展示用户界面 """
+        self.system_tray.setVisible(True)
         self.system_tray.show()
 
     def __close(self):

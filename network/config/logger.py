@@ -20,7 +20,7 @@ class LOG(object):
     @staticmethod
     def load(filename='base.conf'):
         """ 加载运行日志配置文件 """
-        filepath = FILE.module(__file__) + filename
+        filepath = FILE.conf(filename)
         lock = threading.Lock()
         lock.acquire()
         try:

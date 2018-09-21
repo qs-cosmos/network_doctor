@@ -53,6 +53,10 @@ class FILE(object):
         filepath = basic_dir + os.sep + filename
         return filepath
 
+    @staticmethod
+    def conf(filename):
+        """ 获取配置文件路径 """
+        return FILE.main() + 'config' + os.sep + filename
 
 class JSON(object):
     """ json 输出格式 """
