@@ -102,7 +102,7 @@ class RUNTIME(object):
     def end():
         """ 结束运行: 回收线程资源 """
         from client.spider import RESULT
-        from client.analyser import EVENT
+        from client.analyzer import EVENT
         RESULT.end()
         EVENT.end()
         RUNTIME.update()

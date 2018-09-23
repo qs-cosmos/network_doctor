@@ -2,7 +2,7 @@
 import time
 
 from client.spider import Spider
-from client.analyser import Analyser
+from client.analyzer import Analyzer
 from client.network import Reporter
 from config.runtime import RUNTIME
 
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     spider = Spider()
     spider.run()
     # 数据分析
-    analyser = Analyser()
+    analyser = Analyzer()
     analyser.run()
     # 网络通信
     reporter = Reporter()

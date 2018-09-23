@@ -27,7 +27,7 @@ class EVENT(object):
         EVENT.UPLOAD.put(False)
 
 
-class Analyser(object):
+class Analyzer(object):
     """ 结果队列处理器 """
     def __init__(self):
         self.logger = Logger.get()

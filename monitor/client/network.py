@@ -283,9 +283,9 @@ class Reporter(object):
             except Exception:
                 info = 'Failed to connect the server (%s, %d).'
                 self.logger.exception(info % self.addr)
-            info = '...build connection: sleeping for %f s...'
-            self.logger.info(info % (SESSION.CERT * 2))
-            time.sleep(SESSION.CERT * 2)
+                info = '...build connection: sleeping for %f s...'
+                self.logger.info(info % (SESSION.CERT * 2))
+                time.sleep(SESSION.CERT * 2)
         return connected and RUNTIME.RUNNING
 
     def __cert(self):
