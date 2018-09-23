@@ -30,10 +30,12 @@ import ConfigParser
 import json
 import struct
 import threading
+import time
 import timeit
 import zlib
-from config.constant import FILE, SOCKET
+from config.constant import FILE, PROTO, SOCKET
 from config.logger import Logger
+from config.runtime import RUNTIME
 
 
 class SESSION:
@@ -44,6 +46,9 @@ class SESSION:
     BUFF_SIZE = 2048                # 接收缓冲区
     TIMEOUT = 1                     # 超时时间
     CODECS = 'utf-8'                # 通信编码
+    # 超时重传次数
+    CERT = 1.5                      # 重新认证间隔
+    RETRY = 2                       # 最大重传次数
 
     @staticmethod
     def load(filename='network.conf'):
@@ -57,8 +62,10 @@ class SESSION:
             SESSION.SERVER_HOST = SESSION.PARSER.get('server', 'host')
             SESSION.SERVER_PORT = SESSION.PARSER.getint('server', 'port')
             SESSION.BUFF_SIZE = SESSION.PARSER.getint('server', 'buff_size')
-            SESSION.CODECS = SESSION.PARSER.get('server', 'codecs')
             SESSION.TIMEOUT = SESSION.PARSER.getint('server', 'timeout')
+            SESSION.CODECS = SESSION.PARSER.get('server', 'codecs')
+            SESSION.CERT = SESSION.PARSER.getfloat('server', 'cert')
+            SESSION.RETRY = SESSION.PARSER.getint('server', 'retry')
         except Exception:
             logger.warn('Please check your session configure.')
             logger.exception('Failed to load the session configure.')
@@ -167,20 +174,27 @@ class FRAME(object):
             return JPRESS.decompress(envelope, mode)
 
     @staticmethod
-    def send(sock, stamp, data):
-        """ 发送数据 """
+    def send(sock, stamp, data='', ack=True):
+        """ 发送数据: ack 是否需要确认 """
         logger = Logger.get()
         envelope = FRAME.construct(stamp, data)
+        status = 0
         try:
             sock.sendall(envelope)
+            logger.info('Successfully send all the data.')
+            if ack:
+                logger.info('...waiting for a acknowledge...')
+                status, data = FRAME.recv(sock, ack=False)
+                if status < 0:
+                    logger.warn('Failed to recevie a acknowledge.')
         except Exception:
             logger.exception('Failed to send all the data.')
-            return False
-        return True
+            status = -5
+        return status
 
     @staticmethod
-    def recv(sock):
-        """ 接收数据
+    def recv(sock, ack=True):
+        """ 接收数据: ack 是否需要发送一个确认
 
         @return: stamp, data
         @rtype : STAMP, TYPE.*
@@ -241,4 +255,87 @@ class FRAME(object):
         except Exception:
             logger.exception('Failed to analysis the application data.')
             return (-4, None)
+        if ack:
+            logger.info('...send a acknowledge...')
+            FRAME.send(sock, STAMP.OK, ack=False)
         return (stamp, message)
+
+
+class Reporter(object):
+    """ 客户端: 封装客户端通信逻辑 """
+    def __init__(self):
+        self.logger = Logger.get()
+        self.logger.info('Create a tcp communication socket.')
+        self.sock = SOCKET.create(SESSION.SERVER_HOST, PROTO.TCP)
+        self.addr = (SESSION.SERVER_HOST, SESSION.SERVER_PORT)
+        self.id = -1
+
+    def __connect(self):
+        """ 建立TCP连接 """
+        connected = False
+        while RUNTIME.RUNNING and not connected:
+            try:
+                info = '...try to connect the server (%s, %d)...'
+                self.logger.info(info % self.addr)
+                if self.sock is not None:
+                    self.sock.connect(self.addr)
+                connected = True
+            except Exception:
+                info = 'Failed to connect the server (%s, %d).'
+                self.logger.exception(info % self.addr)
+            info = '...build connection: sleeping for %f s...'
+            self.logger.info(info % (SESSION.CERT * 2))
+            time.sleep(SESSION.CERT * 2)
+        return connected and RUNTIME.RUNNING
+
+    def __cert(self):
+        """ 客户端身份认证 """
+        while RUNTIME.RUNNING and self.id == -1:
+            self.logger.info('Start to identify authenticate.')
+            status = FRAME.send(self.sock, STAMP.ID, RUNTIME.ID)
+            if status:
+                stamp, self.id = FRAME.recv(self.sock)
+            if (not status) or stamp < 0:
+                self.logger.warn('Failed to identify authenticate.')
+                self.id = -1
+                # 休眠一秒后再进行通信
+                self.logger.warn('...sleep for two seconds...')
+                time.sleep(SESSION.CERT)
+        if self.id == -1:
+            return False
+        RUNTIME.id(self.id)
+        self.logger.info('Succeed to identify authenticate.')
+        return True
+
+    def __upload(self, stamp, data):
+        """ 上传 客户端监测数据 """
+        status = STAMP.RETRY
+        retry = 0
+        while status == STAMP.RETRY and retry < SESSION.RETRY:
+            self.logger.info('...retry the %dth transimission...')
+            retry = retry + 1
+            status = FRAME.send(self.sock, stamp, data)
+        return status
+
+    def __upload_dispatch(self):
+        """ 批处理 """
+        from client.analyser import EVENT
+        # 通信逻辑
+        # 数据上传
+        while True:
+            event = EVENT.UPLOAD.get()
+            if event is False:
+                break
+            self.__upload(event[0], event[1])
+
+    def __dispatcher(self):
+        """ 创建 批处理 线程 """
+        # 尝试建立 TCP 连接
+        if self.__connect() and self.__cert():
+            # 上传数据
+            uploader = threading.Thread(target=self.__upload_dispatch)
+            uploader.start()
+
+    def run(self):
+        """ 启动 网络通信线程 """
+        threading.Thread(target=self.__dispatcher).start()

@@ -56,5 +56,5 @@ class MainWindow(QDialog):
     def __close(self):
         """ 退出 """
         from config.runtime import RUNTIME
-        RUNTIME.running(False)
+        RUNTIME.end()
         qApp.quit()

@@ -6,12 +6,12 @@
 基本思路:
 - 采用 任务队列与调度器 机制
     - 每个调度器面向一个任务队列, 调度器内部多线程处理任务;
-    - 不同调度器采取不同的休眠周期, 预留提前结束休眠机制;
+    - 不同调度器采取不同的休眠周期, 添加调度器线程为 守护线程;
     - 不同调度器之间通过任务队列同步处理信号;
     - 每个调度器维护一个公共的结果队列, 供外部访问。
 """
 
-from queue import Queue
+from Queue import Queue
 import threading
 import time
 import ConfigParser
@@ -184,27 +184,10 @@ class RESULT(object):
     ICMPING = Queue()
 
     @staticmethod
-    def add(queue, result):
-        """ 添加一个结果 """
-        lock = threading.Lock()
-        lock.acquire()
-        try:
-            queue.put(result)
-        finally:
-            lock.release
-
-    @staticmethod
-    def get(queue):
-        """ 获取一个结果 """
-        lock = threading.Lock()
-        lock.acquire()
-        result = None
-        try:
-            if len(queue) > 0:
-                result = queue.get()
-        finally:
-            lock.release()
-            return result
+    def end():
+        """ 添加结果队列结束符 """
+        RESULT.DNS.put(False)
+        RESULT.ICMPING.put(False)
 
 
 class Spider(object):
@@ -258,7 +241,7 @@ class Spider(object):
 
         # 将解析结果导出结果队列
         result = {domain: resolver.json()}
-        RESULT.add(RESULT.DNS, result)
+        RESULT.DNS.put(result)
         # 将得到的 ip 导入任务队列
         try:
             ips = map(lambda x: (domain, x), resolver.ips())
@@ -282,7 +265,7 @@ class Spider(object):
         for _ in range(CONF.ICMPING_RETRY):
             icmping.ping()
         result = {domain: {'ip': ip, 'icmping': icmping.json()}}
-        RESULT.add(RESULT.ICMPING, result)
+        RESULT.ICMPING.put(result)
         Logger.log_out()
 
     def __dns_dispatch(self):
@@ -321,7 +304,7 @@ class Spider(object):
 
     def run(self):
         """ 启动 网络监测线程 """
-        # DNS 解析线器
+        # DNS 解析线程
         self.__dispatcher(self.__dns_dispatch)
         self.logger.info('Create a dispatcher for dns resolve.')
         # ICMPing 检查线程

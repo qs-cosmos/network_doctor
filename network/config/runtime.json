@@ -1,7 +1,7 @@
 {
     "default_check_list": [
-        "www.baidu.com",
+        "www.baidu.com", 
         "tcs.bytedance.net"
-    ],
+    ], 
     "id": -1
 }

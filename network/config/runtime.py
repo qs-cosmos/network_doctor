@@ -80,6 +80,16 @@ class RUNTIME(object):
             lock.release()
 
     @staticmethod
+    def id(id_):
+        """ 修改 客户端 ID """
+        lock = threading.Lock()
+        lock.acquire()
+        try:
+            RUNTIME.ID = id_
+        finally:
+            lock.release()
+
+    @staticmethod
     def running(status):
         lock = threading.Lock()
         lock.acquire()
@@ -87,6 +97,16 @@ class RUNTIME(object):
             RUNTIME.RUNNING = status
         finally:
             lock.release()
+
+    @staticmethod
+    def end():
+        """ 结束运行: 回收线程资源 """
+        from client.spider import RESULT
+        from client.analyser import EVENT
+        RESULT.end()
+        EVENT.end()
+        RUNTIME.update()
+        RUNTIME.running(False)
 
 
 class OS(object):
