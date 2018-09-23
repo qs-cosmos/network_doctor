@@ -23,7 +23,7 @@ class FILE(object):
         return os.path.dirname(os.path.realpath(sys.argv[0])) + os.sep
 
     @staticmethod
-    def new(archive='', dirname='log', filename='network', filetype='log'):
+    def new(archive='', dirname='log', filename='monitor', filetype='log'):
         """ 根据当前时间, 创建一个新文件
 
         @param archive: 文件归档名
