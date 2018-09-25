@@ -1,8 +1,8 @@
-# network_doctor
-Troubleshoot problems in the network.
+# WoodPecker(啄木鸟) 详细设计文档
 
-# Dependencies
-+ python2.7
-+ pip
-    + enum34
-    + gevent
+
+## Monitor (客户端)
+
+## Manager (服务器)
+
+## 打包与发布

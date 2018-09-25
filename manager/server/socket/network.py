@@ -185,7 +185,7 @@ class FRAME(object):
 
     @staticmethod
     def send(sock, stamp, data=''):
-        """ 发送数据: ack 是否需要确认 """
+        """ 发送数据 """
         logger = Logger.get()
         envelope = FRAME.construct(stamp, data)
         try:
@@ -198,7 +198,7 @@ class FRAME(object):
 
     @staticmethod
     def recv(sock):
-        """ 接收数据: ack 是否需要发送一个确认
+        """ 接收数据
 
         @return: stamp, data
         @rtype : STAMP, TYPE.*
