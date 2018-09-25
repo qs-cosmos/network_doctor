@@ -106,4 +106,4 @@ venv.bak/
 # result
 result/
 data/
-config/runtime.json
+monitor/config/runtime.json
