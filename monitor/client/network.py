@@ -19,8 +19,6 @@
     - 接收: 等待接收 >= 8bytes 的数据, 解析待接收的数据长度, 直到接收的数据长度
       等于完整的数据长度, 再数据类型解析数据, 最后发送一个确认信息。
         - 超时时间
-        - 超时请求重传
-        - 请求重传次数
 - 目的:
     - 解决应用层接收数据时过多或过少的问题
     - 隐藏数据接收发送的具体逻辑, 上层提供和接收 消息类型 和 待发送的数据
@@ -55,7 +53,7 @@ class SESSION:
         logger = Logger.get()
         filepath = FILE.conf(filename)
         lock = threading.Lock()
-        lock = lock.acquire()
+        lock.acquire()
         try:
             logger.info('Start to load the session configure.')
             SESSION.PARSER.read(filepath)
@@ -76,13 +74,12 @@ class SESSION:
 class STAMP:
     """ 消息类型 """
     # 通信逻辑 (0~127)
-    OK = 0                          # 接收完成确认
-    RETRY = 1                       # 请求重传
+    ID = 0                          # 会话 ID
+    END = 1                         # 结束会话
     # 消息内容标识 (128~255)
-    ID = 128                        # 会话 ID
-    CLIENT = 129                    # 客户端基本配置
-    DNS_RESOLVE = 130               # DNS 解析
-    ICMPING = 131                   # ICMPing 结果
+    CLIENT = 128                    # 客户端基本配置
+    DNS_RESOLVE = 129               # DNS 解析
+    ICMPING = 130                   # ICMPing 结果
 
 
 class TYPE:
@@ -92,6 +89,8 @@ class TYPE:
     FLOAT = 2                       # float
     INT = 3                         # int
     STRING = 4                      # str
+    UNICODE = 5                     # unicode
+    UNKNOWN = 6                     # 未知类型
 
     @staticmethod
     def type(data):
@@ -106,6 +105,9 @@ class TYPE:
             return TYPE.INT
         if type_ == str:
             return TYPE.STRING
+        if type_ == unicode:
+            return TYPE.UNICODE
+        return TYPE.UNKNOWN
 
 
 class JPRESS:
@@ -131,7 +133,7 @@ class JPRESS:
         except Exception:
             logger.exception('Failed to compress data by zlib.')
         finally:
-            return (JPRESS.JSON, mode)
+            return (mode, str_)
 
     @staticmethod
     def decompress(data, mode):
@@ -144,6 +146,7 @@ class JPRESS:
 class FRAME(object):
     """ 应用层通信框架 """
     HEAD = '!BBBBL'
+    PACKET = ''
 
     @staticmethod
     def construct(stamp, data):
@@ -174,73 +177,61 @@ class FRAME(object):
             return JPRESS.decompress(envelope, mode)
 
     @staticmethod
-    def send(sock, stamp, data='', ack=True):
-        """ 发送数据: ack 是否需要确认 """
+    def send(sock, stamp, data=''):
+        """ 发送数据 """
         logger = Logger.get()
         envelope = FRAME.construct(stamp, data)
-        status = 0
         try:
             sock.sendall(envelope)
             logger.info('Successfully send all the data.')
-            if ack:
-                logger.info('...waiting for a acknowledge...')
-                status, data = FRAME.recv(sock, ack=False)
-                if status < 0:
-                    logger.warn('Failed to recevie a acknowledge.')
+            return True
         except Exception:
             logger.exception('Failed to send all the data.')
-            status = -5
-        return status
+            return False
 
     @staticmethod
-    def recv(sock, ack=True):
-        """ 接收数据: ack 是否需要发送一个确认
+    def recv(sock):
+        """ 接收数据
 
         @return: stamp, data
         @rtype : STAMP, TYPE.*
+
+        说明: stamp < 0 表示 recv 异常退出
+            - 目前只有 stamp == -1 存在意义, 即 socket 异常关闭
         """
         logger = Logger.get()
         remain = 0
-        envelope = ''
         logger.info('Start to recveive a application data.')
         start = timeit.default_timer()
 
         # 接收数据头部
         logger.info('Waiting for a application data header.')
-        while len(envelope) < 8:
+        while len(FRAME.PACKET) < 8:
             remain = SESSION.TIMEOUT - timeit.default_timer() + start
             recv_, data = SOCKET.recvfrom(sock, remain, size=SESSION.BUFF_SIZE)
             if recv_ < 0:
                 logger.warn('Failed to get the application data header.')
-                return (-1, None)
-            envelope = envelope + data
+                return (recv_, None)
+            FRAME.PACKET = FRAME.PACKET + data
         logger.info('Succeed to get the application data header.')
 
         # 解析数据头部
-        stamp, type_, flags, _, length = FRAME.analysis(envelope)
-        envelope = envelope[8:]
-        if length < len(envelope):
-            warn = 'The length of data fragment is bigger than expected.'
-            logger.warn(warn)
-            logger.warn('Failed to get the application data.')
-            return (-2, None)
+        stamp, type_, flags, _, length = FRAME.analysis(FRAME.PACKET)
+        FRAME.PACKET = FRAME.PACKET[8:]
 
         # 接收数据段
         logger.info('Waiting for the application data fragment.')
-        while length != len(envelope):
+        while length > len(FRAME.PACKET):
             remain = SESSION.TIMEOUT - timeit.default_timer() + start
             recv_, data = SOCKET.recvfrom(sock, remain, size=SESSION.BUFF_SIZE)
             if recv_ < 0:
                 logger.warn('Failed to get the application data fragment.')
-                return (-3, None)
-            envelope = envelope + data
-            if length < len(envelope):
-                warn = 'The length of data fragment is bigger than expected.'
-                logger.warn(warn)
-                logger.warn('Failed to get the application data.')
-                return (-2, None)
+                return (recv_, None)
+            FRAME.PACKET = FRAME.PACKET + data
         logger.info('Succeed to get the application data fragment.')
 
+        envelope = FRAME.PACKET[:length]
+        FRAME.PACKET = FRAME.PACKET[length:]
         # 解析数据段
         message = None
         try:
@@ -252,12 +243,14 @@ class FRAME(object):
                 message = int(envelope)
             elif type_ == TYPE.STRING:
                 message = envelope
+            elif type_ == TYPE.UNICODE:
+                message == envelope
+            elif type_ == TYPE.UNKNOWN:
+                logger.warn('Get a unknown data type message and thrown away.')
+                return (-6, None)
         except Exception:
             logger.exception('Failed to analysis the application data.')
-            return (-4, None)
-        if ack:
-            logger.info('...send a acknowledge...')
-            FRAME.send(sock, STAMP.OK, ack=False)
+            return (-5, None)
         return (stamp, message)
 
 
@@ -266,6 +259,7 @@ class Reporter(object):
     def __init__(self):
         self.logger = Logger.get()
         self.logger.info('Create a tcp communication socket.')
+        self.dispatchers = []
         self.sock = SOCKET.create(SESSION.SERVER_HOST, PROTO.TCP)
         self.addr = (SESSION.SERVER_HOST, SESSION.SERVER_PORT)
         self.id = -1
@@ -290,37 +284,34 @@ class Reporter(object):
 
     def __cert(self):
         """ 客户端身份认证 """
-        while RUNTIME.RUNNING and self.id == -1:
-            self.logger.info('Start to identify authenticate.')
-            status = FRAME.send(self.sock, STAMP.ID, RUNTIME.ID)
-            if status:
-                stamp, self.id = FRAME.recv(self.sock)
-            if (not status) or stamp < 0:
-                self.logger.warn('Failed to identify authenticate.')
-                self.id = -1
+        cert = False
+        stamp = -255
+
+        self.logger.info('Start to identify authenticate %d.' % RUNTIME.ID)
+        while RUNTIME.RUNNING and not cert:
+            self.logger.info('...try to identify authenticate...')
+            FRAME.send(self.sock, STAMP.ID, RUNTIME.ID)
+            stamp, self.id = FRAME.recv(self.sock)
+            cert = True if stamp >= 0 else False
+            if stamp < 0:
                 # 休眠一秒后再进行通信
+                self.logger.warn('...failed to identify authenticate...')
                 self.logger.warn('...sleep for two seconds...')
                 time.sleep(SESSION.CERT)
-        if self.id == -1:
-            return False
-        RUNTIME.id(self.id)
-        self.logger.info('Succeed to identify authenticate.')
-        return True
+
+        if RUNTIME.RUNNING:
+            RUNTIME.id(self.id)
+            self.logger.info('Succeed to identify authenticate %d.')
+        return RUNTIME.RUNNING and cert
 
     def __upload(self, stamp, data):
         """ 上传 客户端监测数据 """
-        status = STAMP.RETRY
-        retry = 0
-        while status == STAMP.RETRY and retry < SESSION.RETRY:
-            self.logger.info('...retry the %dth transimission...')
-            retry = retry + 1
-            status = FRAME.send(self.sock, stamp, data)
-        return status
+        self.logger.info('Start the upload queue data transimission.')
+        FRAME.send(self.sock, stamp, data)
 
     def __upload_dispatch(self):
-        """ 批处理 """
-        from client.analyser import EVENT
-        # 通信逻辑
+        """ 上传队列批处理 """
+        from client.analyzer import EVENT
         # 数据上传
         while True:
             event = EVENT.UPLOAD.get()
@@ -331,11 +322,26 @@ class Reporter(object):
     def __dispatcher(self):
         """ 创建 批处理 线程 """
         # 尝试建立 TCP 连接
-        if self.__connect() and self.__cert():
+        if self.__connect() and self.__cert() and RUNTIME.RUNNING:
             # 上传数据
             uploader = threading.Thread(target=self.__upload_dispatch)
+            self.dispatchers.append(uploader)
             uploader.start()
+
+        # 等待数据上传结束
+        self.__join()
+        # 向服务器发送 结束报文
+        self.logger.info('Send the end packet to server.')
+        FRAME.send(self.sock, STAMP.END)
+        # 关闭 socket
+        SOCKET.close(self.sock)
+        self.logger.info('...close the reporter socket...')
 
     def run(self):
         """ 启动 网络通信线程 """
+        SESSION.load()
         threading.Thread(target=self.__dispatcher).start()
+
+    def __join(self):
+        for dispatcher in self.dispatchers:
+            dispatcher.join()

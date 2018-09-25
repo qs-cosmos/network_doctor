@@ -112,7 +112,7 @@ class SOCKET(object):
         logger = Logger.get()
         if timeout < 0:
             logger.warning('Waiting for the packet timeout.')
-            return (-1, None)
+            return (-4, None)
         try:
             readable = select.select([sock], [], [], timeout)[0]
         except Exception:
@@ -120,7 +120,7 @@ class SOCKET(object):
             return (-2, None)
         if len(readable) == 0:
             logger.warning('Waiting for the packet timeout.')
-            return (-1, None)
+            return (-4, None)
 
         # 参考: https://stackoverflow.com/questions/52288283
         byte_stream = bytearray(size)
@@ -128,8 +128,11 @@ class SOCKET(object):
         recv_time = 0
         try:
             nbytes, addr = sock.recvfrom_into(byte_stream)
+            if nbytes == 0:
+                logger.warning('...the socket abnormal closed...')
+                return (-1, None)
             recv_time = timeit.default_timer()
-            logger.info('Successfully receive a packet.')
+            logger.info('Successfully receive a packet %d bytes.' % nbytes)
         except Exception:
             logger.exception('Failed to receive a packet.')
             return (-3, None)
