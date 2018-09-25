@@ -106,3 +106,4 @@ venv.bak/
 # result
 result/
 data/
+config/runtime.json
