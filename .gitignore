@@ -105,3 +105,4 @@ venv.bak/
 
 # Temporary File
 temp_*.*
+*.swp
