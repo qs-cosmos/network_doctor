@@ -103,8 +103,5 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# runtime
-runtime.json
-# result
-result/
-data/
+# Temporary File
+temp_*.*
