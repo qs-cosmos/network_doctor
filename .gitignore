@@ -104,7 +104,11 @@ venv.bak/
 .mypy_cache/
 
 # Temporary File
+temp/
+test/
 temp_*.*
 *.swp
 /docs/samples
 think_*.*
+*.o
+*.out
