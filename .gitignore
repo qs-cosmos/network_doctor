@@ -106,9 +106,12 @@ venv.bak/
 # Temporary File
 temp/
 test/
+
 temp_*.*
 *.swp
-/docs/samples
 think_*.*
 *.o
 *.out
+
+/docs/samples
+/src/monitor/monitor
