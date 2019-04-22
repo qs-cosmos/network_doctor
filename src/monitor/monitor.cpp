@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 
 #include <pcap.h>
+#include <unistd.h>
 
 #include "system_sniffer.h"
 
@@ -79,18 +80,36 @@ void test_run_dev() {
 
 void test_tcp_sock() {
     WpTcpSockMap sock_map;
-    wp_tcp_socks(&sock_map);
+    WpProcMap proc_map;
+    char done = 3;
+    do {
+        --done;
+        wp_tcp_socks(&sock_map, &proc_map);
+        WpProcMapIter proc_map_iter = proc_map.begin();
+        while(proc_map_iter != proc_map.end()) {
+            proc_map_iter->second->print();
+            ++proc_map_iter;
+        }
+        WpTcpSockMapIter sock_map_iter = sock_map.begin();
+        while(sock_map_iter != sock_map.end()) {
+            sock_map_iter->second->print();
+            ++sock_map_iter;
+        }
+        sleep(1);
+    } while (done);
 
-    WpTcpSockMapIter sock_map_iter = sock_map.begin();
-    while(sock_map_iter != sock_map.end()) {
-        sock_map_iter->second->print();
-        ++sock_map_iter;
-    }
 }
 
 int main() {
+    // WpProc wp_proc(10675);
+    // do{
+        // sleep(3);
+    // test_tcp_sock();
+    //     wp_proc.update();
+    //     wp_proc.print();
+    // } while(1);
     test_run_dev();
-    test_tcp_sock();
+    // test_tcp_sock();
     return 0;
 }
 

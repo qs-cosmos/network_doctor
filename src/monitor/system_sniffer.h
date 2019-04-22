@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <map>
+#include <memory>
 
 #include <arpa/nameser.h>
 #include <ifaddrs.h>
@@ -26,7 +27,6 @@
 
 
 /* 报文截获 + 解构 */
-
 typedef struct { uint16_t proto; } __Eth_P;
 typedef struct { uint8_t proto; } __Ip_P;
 typedef struct { uint16_t port; } __Port;
@@ -128,8 +128,8 @@ class WpDev {
 
         WpDev();
 
+        uint32_t net();
         void print();
-        void net();
 };
 
 // 添加一个cmp比较函数
@@ -143,30 +143,55 @@ struct __cmp_str
     }
 };
 
-typedef std::map<const char *, WpDev *, __cmp_str> WpDevMap;
-typedef std::map<const char *, WpDev *, __cmp_str>::iterator WpDevMapIter;
+typedef std::shared_ptr<WpDev> WpDevPtr;
+typedef std::map<const char *, WpDevPtr, __cmp_str> WpDevMap;
+typedef std::map<const char *, WpDevPtr, __cmp_str>::iterator WpDevMapIter;
 
 int wp_run_devs(WpDevMap *);
 
 
 /* 系统资源 —— 套接字 <=> 进程 */
+
+class WpProc {
+    public:
+        static const char *PROC_ROOT;   // proc 根目录
+        static uint64_t SYS_MEM;        // 系统内存 单位: KB
+        static long CLK_TCK;            // CPU 时钟频率
+        static long PAGE_SIZE;          // 内存页大小
+
+        char name[PR_GET_NAME];         // 进程名
+        char *exec_path;                // 执行路径
+
+        float cpu_time;                 // CPU 时间 单位: s
+        float up_time;                  // 系统时间 单位: s
+        float start_time;               // 开始时间 单位: s
+        uint64_t use_mem;               // 使用内存 单位: KB
+
+        float old_cpu_time;             // 历史CPU 时间 单位: s
+        float old_up_time;              // 历史系统时间 单位: s
+
+        WpProc(uint32_t);
+        ~WpProc();
+
+        void update();
+        uint32_t pid();
+        float cpu();                    // CPU 占用率
+        float mem();                    // 内存占用率
+        void print();
+    private:
+        uint32_t __pid;                 // 进程ID
+};
+
 class WpInetSock {
     public:
-        // socket <= inode(标识符) => process
         uint32_t inode;
-
-        // socket
+        uint32_t pid;
+        uint32_t uid;
+        uint32_t fd;
         uint32_t sip;
         uint32_t dip;
         uint16_t sport;
         uint16_t dport;
-
-        // process
-        uint32_t pid;
-        uint32_t fd;
-        char pname[PR_GET_NAME];
-        double cpu;
-        uint64_t mem;
 
         WpInetSock();
 
@@ -176,6 +201,7 @@ class WpInetSock {
 class WpTcpSock: public WpInetSock {
     public:
         uint8_t state;
+        uint8_t timer;
         struct tcp_info info;
 
         WpTcpSock();
@@ -197,8 +223,16 @@ static const std::map<uint8_t, const char *const>  SOCK_STATE = {
     {TCP_CLOSING, "CLOSING"}
 };
 
-typedef std::map<uint32_t, WpTcpSock *> WpTcpSockMap;
-typedef std::map<uint32_t, WpTcpSock *>::iterator WpTcpSockMapIter;
-int wp_tcp_socks(WpTcpSockMap *);
+typedef std::shared_ptr<WpProc> WpProcPtr;
+// map<pid, WpProc>
+typedef std::map<uint32_t, WpProcPtr> WpProcMap;
+typedef std::map<uint32_t, WpProcPtr>::iterator WpProcMapIter;
+
+typedef std::shared_ptr<WpTcpSock> WpTcpSockPtr;
+// map<inode, WpTcpSock>
+typedef std::map<uint32_t, WpTcpSockPtr> WpTcpSockMap;
+typedef std::map<uint32_t, WpTcpSockPtr>::iterator WpTcpSockMapIter;
+
+int wp_tcp_socks(WpTcpSockMap *, WpProcMap *);
 
 #endif

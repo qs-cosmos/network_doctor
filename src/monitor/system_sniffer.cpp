@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <string>
 
 #include "system_sniffer.h"
 
@@ -48,6 +49,32 @@ char *__inet_addr (uint32_t ip, char *__addr) {
     };
     inet_ntop(AF_INET, &addr, __addr, INET_ADDRSTRLEN);
     return __addr;
+}
+
+// 获取 proc 根目录
+const char *__proc_root() {
+    static std::string root = getenv("PROC_ROOT") ? : "/proc/";
+    uint32_t len = root.length();
+    if (len == 0 || root[len-1] != '/') root.append("/");
+    return root.data();
+}
+
+// 获取 系统内存 大小
+uint64_t __sys_mem() {
+    const char *root = __proc_root();
+    uint32_t len = strlen(root) + 8;
+    uint64_t sys_mem = 1;   // 避免除0操作
+    char *path = new char[len];
+
+    snprintf(path, len, "%smeminfo", root);
+
+    FILE *fp = fopen(path, "r");
+    if (fp) {
+        fscanf(fp, "%*s%lu", &sys_mem);
+        fclose(fp);
+    }
+    delete [] path;
+    return sys_mem;
 }
 
 /*
@@ -168,24 +195,6 @@ void WpDns::print() {
     WpInet::print();
 }
 
-WpDev::WpDev() {
-    memset(this->name, 0, IF_NAMESIZE);
-    memset(this->mac, 0, ETH_ALEN);
-    this->ip = 0;
-    this->netmask = 0;
-    this->gateway = 0;
-}
-
-void WpDev::print() {
-
-    printf("name:%-16s  mac:", this->name);
-    for(int i = 0; i < 6; i++)
-        printf("%02X%s",this->mac[i], i < 5 ? ":":"");
-    printf("     ip:%-16s", __inet_addr(this->ip));
-    printf("netmask:%-16s", __inet_addr(this->netmask));
-    printf("gateway:%-16s\n", __inet_addr(this->gateway));
-}
-
 pcap_t *wp_pcap_handler(char *dev, uint32_t net, char *filter, char *errbuf) {
     struct bpf_program fp;
 
@@ -217,11 +226,31 @@ pcap_t *wp_pcap_handler(char *dev, uint32_t net, char *filter, char *errbuf) {
     return handler;
 }
 
-
 /*
  * 硬件配置 - 网络接口
  */
 
+WpDev::WpDev() {
+    memset(this->name, 0, IF_NAMESIZE);
+    memset(this->mac, 0, ETH_ALEN);
+    this->ip = 0;
+    this->netmask = 0;
+    this->gateway = 0;
+}
+
+uint32_t WpDev::net() {
+    return this->ip & this->netmask;
+}
+
+void WpDev::print() {
+    printf("name:%-16s  mac:", this->name);
+    for(int i = 0; i < 6; i++)
+        printf("%02X%s",this->mac[i], i < 5 ? ":":"");
+    printf("     ip:%-16s", __inet_addr(this->ip));
+    printf("netmask:%-16s", __inet_addr(this->netmask));
+    printf("    net:%-16s", __inet_addr(this->net()));
+    printf("gateway:%-16s\n", __inet_addr(this->gateway));
+}
 
 int wp_run_devs(WpDevMap *dev_map) {
     if(!dev_map) return -1;
@@ -290,11 +319,11 @@ int wp_run_devs(WpDevMap *dev_map) {
                     attr = RTA_NEXT(attr, rta_len);
                 }
                 if (name && ip) {
-                    WpDev *run_dev;
+                    WpDevPtr run_dev;
                     if(dev_map->count(name))
                         run_dev = dev_map->at(name);
                     else {
-                        run_dev = new WpDev();
+                        run_dev = WpDevPtr(new WpDev());
                         strcpy(run_dev->name, name);
                         // char *name 本质是一个地址变量
                         // WpDevMap 实际的key值是 name 的地址变量值
@@ -319,7 +348,7 @@ int wp_run_devs(WpDevMap *dev_map) {
     for(dev = devList; dev; dev = dev->ifa_next) {
         if (!(dev->ifa_flags & IFF_UP)) continue;
         const char *name = dev->ifa_name;
-        WpDev *run_dev;
+        WpDevPtr run_dev;
 
         if(dev_map->count(name))
             run_dev = dev_map->at(name);
@@ -351,32 +380,134 @@ int wp_run_devs(WpDevMap *dev_map) {
  * 系统资源 —— 套接字 <=> 进程
  */
 
+const char *WpProc::PROC_ROOT = __proc_root();
+uint64_t WpProc::SYS_MEM = __sys_mem();
+long WpProc::CLK_TCK = sysconf(_SC_CLK_TCK);
+long WpProc::PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
+
+WpProc::WpProc(uint32_t pid) {
+    this->__pid = pid;
+    this->name[0] = '\0';
+    this->exec_path = NULL;
+    this->cpu_time = 0.0;
+    this->up_time = 0.0;
+    this->start_time = 0.0;
+    this->use_mem = 0;
+    this->old_up_time = 0.0;
+    this->update();
+}
+
+WpProc::~WpProc() {
+    if(this->exec_path) delete [] this->exec_path;
+    this->exec_path = NULL;
+}
+
+void WpProc::update() {
+    uint32_t len = strlen(this->PROC_ROOT) + 16;
+    char *path = new char[len];
+    char lnk[1024];
+    uint64_t utime = 0, stime = 0, rss = 0;
+    unsigned long long start_time = 0;
+    FILE *fp;
+    float old_up_time = 0.0;
+    int lnk_len = 0;
+
+    // 读取 /proc/uptime
+    snprintf(path, len , "%s/uptime", this->PROC_ROOT);
+    if ((fp = fopen(path, "r")) != NULL) {
+        old_up_time = this->up_time;
+        fscanf(fp, "%f", &this->up_time);
+        // 避免两次更新时间间隔太短
+        if (this->up_time - old_up_time < 0.5) {
+            this->up_time = old_up_time;
+            return;
+        }
+        fclose(fp);
+    }
+
+    // 读取 /proc/[pid]/exe
+    if (this->exec_path == NULL) {
+        snprintf(path, len , "%s%d/exe", this->PROC_ROOT, this->__pid);
+        lnk_len = readlink(path, lnk, sizeof(lnk) - 1);
+        if (lnk_len != -1) {
+            lnk[lnk_len] = '\0';
+            this->exec_path = new char[lnk_len + 1];
+            strcpy(this->exec_path, lnk);
+            this->exec_path[lnk_len] = '\0';
+        }
+    }
+
+    // 读取 /proc/[pid]/stat
+    snprintf(path, len, "%s%u/stat", this->PROC_ROOT, this->__pid);
+    if ((fp = fopen(path, "r")) != NULL) {
+        fscanf(fp, "%*u (%[^)]) %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u "
+           "%*u %lu %lu %*d %*d %*d %*d %*d %*d %llu %*u %lu", this->name,
+           &utime, &stime, &start_time, &rss
+        );
+        fclose(fp);
+    }
+
+    this->old_cpu_time = this->cpu_time;
+    this->cpu_time = (float)(utime + stime) / this->CLK_TCK;
+
+    this->start_time = (float)start_time / this->CLK_TCK;
+    if(this->old_up_time < 0.1)
+        this->old_up_time = this->start_time;
+    else
+        this->old_up_time = old_up_time;
+
+    this->use_mem = rss * this->PAGE_SIZE / 1024;
+
+    delete [] path;
+}
+
+uint32_t WpProc::pid() {
+    return this->__pid;
+}
+
+float WpProc::cpu() {
+    float cpu_time = this->cpu_time - this->old_cpu_time;
+    float run_time = this->up_time - this->old_up_time;
+    if (run_time < 0.0 || cpu_time < 0.00001) return 0.0;
+    return cpu_time / run_time;
+}
+
+float WpProc::mem() {
+    return (float)this->use_mem / this->SYS_MEM;
+}
+
+void WpProc::print() {
+    // printf("%-12.6f  %-12.6f %-12.6f  %-12.6f\n",
+    //     this->cpu_time, this->old_cpu_time, this->up_time, this->old_up_time
+    // );
+    printf("pid=%-8u    name=%-16s cpu=%8.6f    mem=%8.6f    path=%s\n",
+        this->pid(), this->name, this->cpu(), this->mem(),
+        this->exec_path ? : ""
+    );
+}
+
 WpInetSock::WpInetSock() {
     this->inode = 0;
-
+    this->pid = 0;
+    this->uid = 0;
+    this->fd = 0;
     this->sip = 0;
     this->dip = 0;
     this->sport = 0;
     this->dport = 0;
-
-    this->pid = 0;
-    this->fd = 0;
-    this->cpu = 0.0;
-    this->mem = 0;
 }
 
 void WpInetSock::print() {
     char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
-    printf("%-10u %15s:%-5u %15s:%-5u pid=%-10u pname=%-20s cpu=%-6.2f mem=%-8lu",
-        this->inode, __inet_addr(this->sip, src), this->sport,
-        __inet_addr(this->dip, dst), this->dport, this->pid, this->pname,
-        this->cpu, this->mem
+    printf("%-10u %-10u %15s:%-5u %15s:%-5u",
+        this->inode, this->pid, __inet_addr(this->sip, src), this->sport,
+        __inet_addr(this->dip, dst), this->dport
     );
 }
 
 WpTcpSock::WpTcpSock(): WpInetSock() {
     this->state = 0;
-    memset(&(this->info), 0, PR_GET_NAME);
+    memset(&(this->info), 0, sizeof(this->info));
 }
 
 void WpTcpSock::print() {
@@ -384,8 +515,8 @@ void WpTcpSock::print() {
     printf(" %s\n", SOCK_STATE.at(this->state));
 }
 
-int wp_tcp_socks(WpTcpSockMap *sock_map) {
-    if(!sock_map) return -1;
+int wp_tcp_socks(WpTcpSockMap *sock_map, WpProcMap * proc_map) {
+    if(!sock_map || !proc_map) return -1;
 
     // socket 列表
     struct sockaddr_nl src, dst;
@@ -438,20 +569,23 @@ int wp_tcp_socks(WpTcpSockMap *sock_map) {
                 uint32_t inode = inet_msg->idiag_inode;
                 if (!inode || (*inet_msg->id.idiag_src & IN_LOOPBACKNET) ==
                     IN_LOOPBACKNET || (*inet_msg->id.idiag_dst & IN_LOOPBACKNET)
-                    == IN_LOOPBACKNET) break;
+                    == IN_LOOPBACKNET ) break;
 
-                WpTcpSock *tcp_sock;
+                WpTcpSockPtr tcp_sock;
                 if(sock_map->count(inode)) tcp_sock = sock_map->at(inode);
                 else {
-                    tcp_sock = new WpTcpSock();
+                    tcp_sock = WpTcpSockPtr(new WpTcpSock);
                     (*sock_map)[inode] = tcp_sock;
                 }
+
                 tcp_sock->inode = inet_msg->idiag_inode;
                 tcp_sock->sip = ntohl(*(inet_msg->id.idiag_src));
                 tcp_sock->dip = ntohl(*(inet_msg->id.idiag_dst));
                 tcp_sock->sport = ntohs(inet_msg->id.idiag_sport);
                 tcp_sock->dport = ntohs(inet_msg->id.idiag_dport);
                 tcp_sock->state = inet_msg->idiag_state;
+                tcp_sock->timer = inet_msg->idiag_timer;
+                tcp_sock->uid = inet_msg->idiag_uid;
 
                 int rta_len = NLMSG_PAYLOAD(nl_msg_hdr, sizeof(*inet_msg));
                 struct rtattr *attr = (struct rtattr *)(inet_msg + 1);
@@ -478,6 +612,7 @@ int wp_tcp_socks(WpTcpSockMap *sock_map) {
     int nameoff;
     DIR *dir;
 
+
     strncpy(name, root, sizeof(name));
 
     if (strlen(name) == 0 || name[strlen(name) - 1] != '/')
@@ -488,24 +623,19 @@ int wp_tcp_socks(WpTcpSockMap *sock_map) {
     if (!dir) return 3;
 
     while ((d = readdir(dir)) != NULL) {
-
         struct dirent *tmp_d;
-        char process[PR_GET_NAME];
-        char *p;
+        char proc = 1;
         int pid, pos;
         DIR *tmp_dir;
         char crap;
 
         // 获取进程 ID
         if (sscanf(d->d_name, "%d%c", &pid, &crap) != 1) continue;
-
+        // 设置 fd 路径
         snprintf(name + nameoff, sizeof(name) - nameoff, "%d/fd/", pid);
         pos = strlen(name);
 
         if ((tmp_dir = opendir(name)) == NULL) continue;
-
-        process[0] = '\0';
-        p = process;
 
         while((tmp_d = readdir(tmp_dir)) != NULL) {
             const char *pattern = "socket:[";
@@ -513,7 +643,6 @@ int wp_tcp_socks(WpTcpSockMap *sock_map) {
             char lnk[64];
             int fd;
             ssize_t link_len;
-            char tmp[1024];
 
             // 获取 文件描述符fd
             if (sscanf(tmp_d->d_name, "%d%c", &fd, &crap) != 1) continue;
@@ -532,19 +661,18 @@ int wp_tcp_socks(WpTcpSockMap *sock_map) {
             sscanf(lnk, "socket:[%u]", &ino);
             if(!sock_map->count(ino)) continue;
 
-            // 获取 进程名称
-            if (*p == '\0') {
-                FILE *fp;
-                snprintf(tmp, sizeof(tmp), "%s/%d/stat", root, pid);
-                if ((fp = fopen(tmp, "r")) != NULL) {
-                    if (fscanf(fp, "%*d (%[^)])", p) < 1);
-                    fclose(fp);
-                }
+            if(proc) {
+                if(proc_map->count(pid) == 0) {
+                    WpProcPtr proc_ptr(new WpProc(pid));
+                    (*proc_map)[pid] = proc_ptr;
+                } else
+                    proc_map->at(pid)->update();
+                proc = 0;
             }
-            WpTcpSock *tcp_sock = sock_map->at(ino);
+
+            WpTcpSockPtr tcp_sock = sock_map->at(ino);
             tcp_sock->pid = pid;
             tcp_sock->fd = fd;
-            strcpy(tcp_sock->pname, p);
         }
         closedir(tmp_dir);
     }
